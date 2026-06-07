@@ -1,0 +1,106 @@
+# syntax=docker/dockerfile:1.4
+# GPU Celery worker: YOLO train/eval/export, auto-annotate, MMYOLO (subprocess).
+# Build order (see scripts/build_stack.sh):
+#   docker compose build ultralytics_runtime mmyolo_runtime
+#   docker compose build worker-gpu
+
+ARG ULTRALYTICS_IMAGE=lai-ultralytics:local
+ARG MMYOLO_IMAGE=lai-mmyolo:local
+FROM ${ULTRALYTICS_IMAGE} AS ultralytics_stack
+FROM ${MMYOLO_IMAGE} AS mmyolo_stack
+
+FROM python:3.10-slim AS builder
+
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        gcc g++ git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+COPY --from=docker_deps requirements-worker-gpu.txt requirements-worker-base.txt constraints-ml-yolo.txt ./
+RUN pip install --upgrade pip setuptools wheel \
+ && pip install --prefix=/install -r requirements-worker-base.txt -c constraints-ml-yolo.txt \
+ && pip install --prefix=/install -r requirements-worker-gpu.txt -c constraints-ml-yolo.txt \
+ && pip install --prefix=/install \
+        'opencv-python-headless>=4.7.0' \
+        'matplotlib>=3.3.0' 'polars' 'ultralytics-thop>=2.0.0'
+
+FROM pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime AS runtime
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    ULTRALYTICS_PYTHON=/opt/conda/bin/python \
+    ULTRALYTICS_SITE=/opt/ultralytics-site \
+    MMYOLO_PYTHON=/opt/conda/envs/mmyolo/bin/python \
+    PYTHONNOUSERSITE=1 \
+    PYTHONPATH=/opt/lai/lib/python3.10/site-packages \
+    PATH=/opt/lai/bin:/opt/conda/bin:$PATH
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 libgomp1 \
+        libfontconfig1 libice6 git curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY --from=ultralytics_stack /opt/ultralytics-site /opt/ultralytics-site
+# ONNX export (model.export format=onnx) uses ultralytics-site, not /opt/lai (stripped at runtime).
+# onnxsim only — onnxslim needs sympy>=1.13 (equal_valued); conda PyTorch 2.1 ships older sympy.
+# download_ultralytics_models.py exports with simplify=False so onnxsim is enough.
+RUN /opt/conda/bin/pip install --no-cache-dir --target=/opt/ultralytics-site \
+        'onnx>=1.12.0,<2' 'onnxsim>=0.4.33' \
+ && PYTHONPATH="/opt/conda/lib/python3.10/site-packages:/opt/ultralytics-site" \
+    /opt/conda/bin/python -c "import onnx; import onnxsim; print('onnx export deps ok', onnx.__version__)"
+COPY --from=mmyolo_stack /opt/conda/envs/mmyolo /opt/conda/envs/mmyolo
+COPY --from=mmyolo_stack /opt/mmyolo /opt/mmyolo
+COPY --from=builder /install /opt/lai
+COPY --from=docker_deps sitecustomize.py /opt/lai/lib/python3.10/site-packages/sitecustomize.py
+COPY --from=docker_deps constraints-ml-yolo.txt ./
+COPY . .
+
+# PyTorch 2.1 (conda) requires NumPy 1.x. requirements-worker-base can pull NumPy 2.x into /opt/lai.
+RUN conda install -y -c conda-forge 'numpy>=1.23.0,<2' \
+ && rm -rf \
+      /opt/lai/lib/python3.10/site-packages/numpy \
+      /opt/lai/lib/python3.10/site-packages/numpy-* \
+      /opt/lai/lib/python3.10/site-packages/numpy.libs \
+    2>/dev/null || true
+
+RUN rm -rf \
+      /opt/lai/lib/python3.10/site-packages/torch \
+      /opt/lai/lib/python3.10/site-packages/torchvision \
+      /opt/lai/lib/python3.10/site-packages/torchgen \
+      /opt/lai/lib/python3.10/site-packages/functorch \
+      /opt/lai/lib/python3.10/site-packages/torch-*.dist-info \
+      /opt/lai/lib/python3.10/site-packages/torchvision-*.dist-info
+
+# Conda base ships an old typing_extensions; upgrade for subprocesses that use conda python.
+RUN /opt/conda/bin/pip install --no-cache-dir --force-reinstall 'typing_extensions>=4.12.0' \
+ && /opt/conda/bin/python -c "from typing_extensions import TypeIs; print('conda typing_extensions ok', TypeIs)"
+
+RUN PYTHONPATH="/opt/conda/lib/python3.10/site-packages:/opt/ultralytics-site" /opt/conda/bin/python -c "\
+import numpy as np; import torch; from ultralytics import YOLO; \
+torch.from_numpy(np.zeros((1, 3, 64, 64), dtype=np.float32)); \
+print('ultralytics subprocess stack ok', np.__version__, torch.__version__)"
+
+# Repair broken typing_extensions dist-info under /opt/lai (Ultralytics pip autoupdate uses this env).
+RUN PYTHONNOUSERSITE=1 /opt/conda/bin/pip install --no-cache-dir --force-reinstall \
+        --target=/opt/lai/lib/python3.10/site-packages 'typing_extensions>=4.12.0' \
+ && PYTHONPATH=/opt/lai/lib/python3.10/site-packages PYTHONNOUSERSITE=1 /opt/conda/bin/python -c "\
+from typing_extensions import TypeIs; from starlette._utils import is_async_callable; \
+print('celery worker deps ok', TypeIs)"
+
+RUN chmod +x /app/scripts/celery_worker_gpu.sh
+
+# MMYOLO train runs in MMYOLO_PYTHON subprocess (Python 3.8 + PyTorch 1.10), not on worker PYTHONPATH.
+RUN env -u PYTHONPATH GLIBC_TUNABLES=glibc.rtld.execstack=2 \
+    "${MMYOLO_PYTHON}" -c "\
+import mmyolo; import torch; from mmdet.apis import init_detector; \
+print('mmyolo subprocess stack ok', torch.__version__)"
+
+RUN mkdir -p /app/projects /app/data /app/models /app/ai_models /app/runs
+
+CMD ["sh", "/app/scripts/celery_worker_gpu.sh"]

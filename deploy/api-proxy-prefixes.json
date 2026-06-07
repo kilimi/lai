@@ -1,0 +1,23 @@
+[
+  "health-check",
+  "test-cors",
+  "training",
+  "tasks",
+  "projects",
+  "datasets",
+  "predictions",
+  "export",
+  "preannotate",
+  "segment",
+  "backup",
+  "database",
+  "system",
+  "pipelines",
+  "augmentations",
+  "models",
+  "static",
+  "data",
+  "dataset-groups",
+  "auto-annotate",
+  "images"
+]

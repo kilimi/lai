@@ -1,0 +1,95 @@
+# Multi-stage build for the Celery training worker.
+# Runtime is the official PyTorch+CUDA image so torch/torchvision are pre-installed
+# with matching CUDA ABI. Weights live on a mounted volume.
+
+# ---------- Stage 1: builder ----------
+FROM python:3.10-slim AS builder
+
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        gcc g++ cmake git wget \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+
+COPY requirements.txt .
+
+# torch/torchvision come from the PyTorch base — strip them to avoid CPU-wheel overrides.
+RUN pip install --upgrade pip setuptools wheel \
+ && grep -viE '^(torch|torchvision)([<>=!~ ].*)?$' requirements.txt > /tmp/req.txt \
+ && pip install --default-timeout=1000 --retries 5 \
+        --prefix=/install -r /tmp/req.txt \
+ && pip install --default-timeout=1000 --retries 5 \
+        --prefix=/install 'ultralytics>=8.3.0,<8.4.0' --no-deps \
+ && pip install --default-timeout=1000 --retries 5 \
+        --prefix=/install \
+        'opencv-python-headless>=4.7.0' \
+        'matplotlib>=3.3.0' 'pillow>=7.1.2' 'pyyaml>=5.3.1' 'requests>=2.23.0' \
+        'scipy>=1.4.1' 'psutil' 'polars' 'ultralytics-thop>=2.0.0' \
+        'celery[redis]>=5.3.0' 'redis>=5.0.0' 'flower>=2.0.0' \
+ && pip install --default-timeout=1000 --retries 5 \
+        --prefix=/install 'openmim>=0.3.9'
+
+# ---------- Stage 2: runtime ----------
+FROM pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime AS runtime
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/opt/lai/lib/python3.10/site-packages \
+    PATH=/opt/lai/bin:$PATH \
+    MMYOLO_PYTHON=/opt/conda/envs/mmyolo/bin/python
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 libgomp1 \
+        libfontconfig1 libice6 git curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY --from=builder /install /opt/lai
+COPY . .
+
+# `pip install ultralytics` (older builds) pulled torch 2.x+cu130 into /opt/lai via PYTHONPATH,
+# shadowing the CUDA 12.1 PyTorch from the base image. nvidia-smi still works, but
+# torch.cuda.is_available() is False and YOLO training silently falls back to CPU.
+RUN rm -rf \
+      /opt/lai/lib/python3.10/site-packages/torch \
+      /opt/lai/lib/python3.10/site-packages/torchvision \
+      /opt/lai/lib/python3.10/site-packages/torchgen \
+      /opt/lai/lib/python3.10/site-packages/functorch \
+      /opt/lai/lib/python3.10/site-packages/torch-*.dist-info \
+      /opt/lai/lib/python3.10/site-packages/torchvision-*.dist-info
+
+# Fail the image build if ultralytics is broken (8.4+ lazy exports break `from ultralytics import YOLO`).
+RUN PYTHONPATH=/opt/lai/lib/python3.10/site-packages python -c "from ultralytics import YOLO; print('ultralytics OK:', YOLO)"
+
+ENV PYTHONNOUSERSITE=1
+
+# Install stable tooling
+RUN pip install --upgrade \
+    pip==23.3.1 \
+    setuptools==68.2.2 \
+    wheel==0.41.2
+
+# Install MMYOLO in a dedicated conda env following the requested stack.
+RUN conda create -n mmyolo python=3.8 pytorch==1.10.1 torchvision==0.11.2 cudatoolkit=11.3 -c pytorch -y \
+ && PYTHONPATH= conda run -n mmyolo pip install openmim \
+ && PYTHONPATH= conda run -n mmyolo python -m mim install "mmengine>=0.6.0" \
+ && PYTHONPATH= conda run -n mmyolo python -m mim install "mmcv>=2.0.0rc4,<2.1.0" \
+ && PYTHONPATH= conda run -n mmyolo python -m mim install "mmdet>=3.0.0,<4.0.0" \
+ && git clone --depth 1 https://github.com/open-mmlab/mmyolo.git /opt/mmyolo \
+ && PYTHONPATH= conda run -n mmyolo pip install -r /opt/mmyolo/requirements/albu.txt \
+ && PYTHONPATH= conda run -n mmyolo python -m mim install -v -e /opt/mmyolo
+
+RUN mkdir -p /app/projects /app/data /app/models /app/ai_models/depth_estimation /app/runs
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD python -c "import requests; requests.get('http://localhost:8000/health-check')" || exit 1
+
+CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "info"]

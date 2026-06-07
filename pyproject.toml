@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lai"
+version = "0.1.0"
+description = "CLI to install and run the LAI annotation stack via Docker Compose."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "LAI maintainers" }]
+license = "AGPL-3.0-only"
+license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_LICENSES.md", "licenses/*.txt"]
+keywords = ["annotation", "docker", "segmentation", "dataset"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.scripts]
+lai = "lai.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/lulu/lai"
+Documentation = "https://github.com/lulu/lai/blob/main/docs/INSTALL_USERS.md"
+Repository = "https://github.com/lulu/lai"
+Issues = "https://github.com/lulu/lai/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["lai*"]
+
+[tool.setuptools.package-data]
+lai = ["bundle/**/*"]

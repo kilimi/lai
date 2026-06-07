@@ -1,0 +1,3 @@
+# Repository-root entrypoint for live backend bind-mount (see dockers/).
+include:
+  - path: dockers/docker-compose.code-mount.yml

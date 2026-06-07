@@ -1,0 +1,16 @@
+# Conda environment for the `lai` CLI.
+# Avoids PEP 668 ("externally-managed-environment") on Debian/Ubuntu when using system Python.
+#
+#   conda env create -f environment.yml
+#   conda activate lai-cli
+#   lai install-gui    # then: lai up
+#
+# From this repository (editable) instead of PyPI: after activate, run: pip install -e .
+name: lai-cli
+channels:
+  - conda-forge
+dependencies:
+  - python >=3.10,<3.13
+  - pip
+  - pip:
+      - lai

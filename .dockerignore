@@ -1,0 +1,24 @@
+node_modules
+dist
+.git
+
+# Local Docker data (MongoDB etc.); unreadable root-owned files break "load build context".
+# Use ** / trailing slashes: a bare ".lai-data" may not exclude nested paths in all Docker versions.
+.lai-data
+.lai-data/**
+**/.lai-data/**
+.lai
+.lai/**
+**/.lai/**
+backend
+geti
+playwright-report
+tests
+test-results
+playwright.config.ts
+coverage
+**/.venv
+**/__pycache__
+*.pyc
+.env
+.env.*

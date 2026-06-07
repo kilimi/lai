@@ -1,0 +1,14 @@
+# Pinned Ultralytics stack for reproducible lai-worker-gpu builds
+numpy>=1.23.0,<2
+# YOLO26 requires ultralytics>=8.4.0 (C3k2 / end2end architecture).
+ultralytics==8.4.10
+opencv-python-headless>=4.8.0,<4.11.0
+matplotlib>=3.3.0,<3.10.0
+pillow>=9.0.0
+pyyaml>=5.3.1
+requests>=2.23.0
+scipy>=1.4.1
+psutil
+polars
+pandas>=1.1.4
+ultralytics-thop>=2.0.0

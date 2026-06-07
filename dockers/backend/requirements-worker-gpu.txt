@@ -1,0 +1,3 @@
+# GPU Celery worker (Ultralytics YOLO / RT-DETR on shared PyTorch base image)
+-r requirements-worker-base.txt
+ultralytics>=8.4.0,<8.5.0

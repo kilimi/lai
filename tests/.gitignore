@@ -1,0 +1,24 @@
+# Playwright
+test-results/
+playwright-report/
+playwright/.cache/
+
+# Performance profiles
+../performances/
+
+# Screenshots
+screenshots/
+*.png
+!fixtures/*.png
+
+# Videos
+videos/
+
+# Coverage
+coverage/
+
+# Test artifacts
+.test-cache/
+
+
+tests/fixtures/

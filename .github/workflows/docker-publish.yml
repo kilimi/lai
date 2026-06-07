@@ -1,0 +1,240 @@
+# Build and push stack images to Docker Hub (for `lai pull` + LAI_*_IMAGE in .env).
+# Tags: semver on version tags (v*); latest on main branch pushes.
+name: Docker publish
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-publish-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOCKERHUB_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+
+jobs:
+  publish-ultralytics:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/lai-ultralytics
+          tags: |
+            type=semver,pattern={{version}},event=tag
+            type=semver,pattern={{major}}.{{minor}},event=tag
+            type=raw,value=latest,enable={{is_default_branch}}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./dockers/backend
+          file: ./dockers/backend/Dockerfile.ultralytics.runtime
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  publish-mmyolo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/lai-mmyolo
+          tags: |
+            type=semver,pattern={{version}},event=tag
+            type=semver,pattern={{major}}.{{minor}},event=tag
+            type=raw,value=latest,enable={{is_default_branch}}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./dockers/backend
+          file: ./dockers/backend/Dockerfile.mmyolo.runtime
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  publish-backend:
+    needs: [publish-mmyolo]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/lai-backend
+          tags: |
+            type=semver,pattern={{version}},event=tag
+            type=semver,pattern={{major}}.{{minor}},event=tag
+            type=raw,value=latest,enable={{is_default_branch}}
+      - id: mmyolo_tag
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            echo "tag=${{ secrets.DOCKERHUB_USERNAME }}/lai-mmyolo:${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ secrets.DOCKERHUB_USERNAME }}/lai-mmyolo:latest" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: ./dockers/backend/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            MMYOLO_IMAGE=${{ steps.mmyolo_tag.outputs.tag }}
+
+  publish-worker-gpu:
+    needs: [publish-ultralytics, publish-mmyolo]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/lai-worker-gpu
+          tags: |
+            type=semver,pattern={{version}},event=tag
+            type=semver,pattern={{major}}.{{minor}},event=tag
+            type=raw,value=latest,enable={{is_default_branch}}
+      - id: rt_tags
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            V="${GITHUB_REF_NAME#v}"
+            echo "ultra=${{ secrets.DOCKERHUB_USERNAME }}/lai-ultralytics:${V}" >> "$GITHUB_OUTPUT"
+            echo "mmyolo=${{ secrets.DOCKERHUB_USERNAME }}/lai-mmyolo:${V}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ultra=${{ secrets.DOCKERHUB_USERNAME }}/lai-ultralytics:latest" >> "$GITHUB_OUTPUT"
+            echo "mmyolo=${{ secrets.DOCKERHUB_USERNAME }}/lai-mmyolo:latest" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: ./dockers/backend/Dockerfile.worker-gpu
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          additional-contexts: |
+            docker_deps=./dockers/backend
+          build-args: |
+            ULTRALYTICS_IMAGE=${{ steps.rt_tags.outputs.ultra }}
+            MMYOLO_IMAGE=${{ steps.rt_tags.outputs.mmyolo }}
+
+  publish-worker-general:
+    needs: [publish-backend]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/lai-worker-general
+          tags: |
+            type=semver,pattern={{version}},event=tag
+            type=semver,pattern={{major}}.{{minor}},event=tag
+            type=raw,value=latest,enable={{is_default_branch}}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: ./dockers/backend/Dockerfile.worker-general
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          additional-contexts: |
+            docker_deps=./dockers/backend
+
+  publish-web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/lai-frontend
+          tags: |
+            type=semver,pattern={{version}},event=tag
+            type=semver,pattern={{major}}.{{minor}},event=tag
+            type=raw,value=latest,enable={{is_default_branch}}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./dockers/frontend/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: VITE_API_URL=SAME_ORIGIN
+
+  publish-sam:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/lai-sam
+          tags: |
+            type=semver,pattern={{version}},event=tag
+            type=semver,pattern={{major}}.{{minor}},event=tag
+            type=raw,value=latest,enable={{is_default_branch}}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./backend/sam_service
+          file: ./dockers/sam/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          additional-contexts: |
+            docker_deps=./dockers/sam

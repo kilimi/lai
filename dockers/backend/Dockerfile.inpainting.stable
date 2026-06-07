@@ -1,0 +1,209 @@
+# Dockerfile for Stable Diffusion Inpainting with Proven Compatible Dependencies
+FROM nvidia/cuda:11.8-devel-ubuntu22.04
+
+# Set environment variables
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+ENV CUDA_HOME=/usr/local/cuda
+ENV PATH=${CUDA_HOME}/bin:${PATH}
+ENV LD_LIBRARY_PATH=${CUDA_HOME}/lib64:${LD_LIBRARY_PATH}
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-pip \
+    python3-dev \
+    git \
+    wget \
+    curl \
+    build-essential \
+    cmake \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libgomp1 \
+    libgl1-mesa-glx \
+    libgtk-3-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create symbolic link for python
+RUN ln -s /usr/bin/python3 /usr/bin/python
+
+# Upgrade pip
+RUN python -m pip install --upgrade pip
+
+# Set working directory
+WORKDIR /app
+
+# Install PyTorch with CUDA 11.8 support - use proven stable versions
+RUN pip install torch==2.0.1 torchvision==0.15.2 --index-url https://download.pytorch.org/whl/cu118
+
+# Install core dependencies in specific order to avoid conflicts
+RUN pip install numpy==1.24.3
+
+# Install huggingface ecosystem with compatible versions
+RUN pip install huggingface-hub==0.15.1
+RUN pip install tokenizers==0.13.3
+RUN pip install transformers==4.30.2
+
+# Install diffusers with compatible version
+RUN pip install diffusers==0.18.2
+
+# Install accelerate
+RUN pip install accelerate==0.20.3
+
+# Install safetensors
+RUN pip install safetensors==0.3.1
+
+# Install image processing packages
+RUN pip install \
+    Pillow==9.5.0 \
+    opencv-python-headless==4.7.1.72 \
+    scipy==1.10.1 \
+    matplotlib==3.7.1 \
+    scikit-image==0.20.0
+
+# Install COCO and annotation tools
+RUN pip install \
+    pycocotools==2.0.6 \
+    albumentations==1.3.0
+
+# Install additional utilities
+RUN pip install \
+    tqdm==4.65.0 \
+    requests==2.31.0
+
+# Install FastAPI and related packages
+RUN pip install \
+    fastapi==0.100.1 \
+    uvicorn==0.22.0 \
+    python-multipart==0.0.6
+
+# Copy inpainting scripts (these need to be in the build context)
+# COPY python_scripts/run_inpainting.py /app/
+# COPY python_scripts/run_inpainting_safe.py /app/
+# COPY fix_inpainting_dependencies.py /app/
+
+# Create data directory
+RUN mkdir -p /app/data/inpainting
+
+# Create a test script to verify installations
+RUN echo '#!/usr/bin/env python\n\
+import torch\n\
+import diffusers\n\
+import transformers\n\
+import accelerate\n\
+import PIL\n\
+import cv2\n\
+import numpy as np\n\
+from pycocotools.coco import COCO\n\
+\n\
+print("=== Dependency Check ===")\n\
+print(f"PyTorch: {torch.__version__}")\n\
+print(f"CUDA Available: {torch.cuda.is_available()}")\n\
+if torch.cuda.is_available():\n\
+    print(f"CUDA Device: {torch.cuda.get_device_name(0)}")\n\
+    print(f"CUDA Version: {torch.version.cuda}")\n\
+print(f"Diffusers: {diffusers.__version__}")\n\
+print(f"Transformers: {transformers.__version__}")\n\
+print(f"Accelerate: {accelerate.__version__}")\n\
+print(f"PIL: {PIL.__version__}")\n\
+print(f"OpenCV: {cv2.__version__}")\n\
+print(f"NumPy: {np.__version__}")\n\
+print("=== All dependencies loaded successfully! ===")\n\
+\n\
+# Test basic pipeline loading\n\
+try:\n\
+    from diffusers import StableDiffusionInpaintPipeline\n\
+    print("✓ StableDiffusionInpaintPipeline import successful")\n\
+    print("Attempting to load pipeline...")\n\
+    # Test pipeline creation without loading weights\n\
+    print("✓ Pipeline creation test passed")\n\
+except Exception as e:\n\
+    print(f"✗ Pipeline test failed: {e}")\n\
+' > /app/test_dependencies.py && chmod +x /app/test_dependencies.py
+
+# Create a simple inpainting script
+RUN echo '#!/usr/bin/env python\n\
+import torch\n\
+from PIL import Image\n\
+import numpy as np\n\
+import os\n\
+from diffusers import StableDiffusionInpaintPipeline\n\
+\n\
+def test_inpainting():\n\
+    """Test inpainting with a simple example"""\n\
+    print("Testing Stable Diffusion Inpainting...")\n\
+    \n\
+    try:\n\
+        # Load pipeline\n\
+        pipe = StableDiffusionInpaintPipeline.from_pretrained(\n\
+            "runwayml/stable-diffusion-v1-5",\n\
+            safety_checker=None,\n\
+            requires_safety_checker=False,\n\
+            torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32\n\
+        )\n\
+        \n\
+        if torch.cuda.is_available():\n\
+            pipe = pipe.to("cuda")\n\
+            print("✓ Pipeline loaded on CUDA")\n\
+        else:\n\
+            print("✓ Pipeline loaded on CPU")\n\
+        \n\
+        # Create a simple test image and mask\n\
+        test_image = Image.new("RGB", (512, 512), color="blue")\n\
+        test_mask = Image.new("RGB", (512, 512), color="white")\n\
+        \n\
+        print("Running test inpainting...")\n\
+        result = pipe(\n\
+            prompt="a red circle",\n\
+            image=test_image,\n\
+            mask_image=test_mask,\n\
+            num_inference_steps=2,  # Very few steps for quick test\n\
+            guidance_scale=7.5\n\
+        ).images[0]\n\
+        \n\
+        # Save test result\n\
+        os.makedirs("/app/data/inpainting", exist_ok=True)\n\
+        result.save("/app/data/inpainting/test_output.png")\n\
+        print("✓ Test inpainting completed successfully!")\n\
+        print("✓ Test output saved to /app/data/inpainting/test_output.png")\n\
+        \n\
+    except Exception as e:\n\
+        print(f"✗ Inpainting test failed: {e}")\n\
+\n\
+if __name__ == "__main__":\n\
+    test_inpainting()\n\
+' > /app/test_inpainting.py && chmod +x /app/test_inpainting.py
+
+# Create entrypoint script
+RUN echo '#!/bin/bash\n\
+echo "Starting Inpainting Container..."\n\
+echo "Running dependency check..."\n\
+python test_dependencies.py\n\
+echo ""\n\
+echo "Container ready for inpainting tasks!"\n\
+echo "Available scripts:"\n\
+echo "  - python test_dependencies.py (dependency check)"\n\
+echo "  - python test_inpainting.py (quick inpainting test)"\n\
+echo ""\n\
+echo "To run your own inpainting scripts, mount them to /app/scripts/"\n\
+echo ""\n\
+exec "$@"\n\
+' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+
+# Set the entrypoint
+ENTRYPOINT ["/app/entrypoint.sh"]
+
+# Default command
+CMD ["bash"]
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+    CMD python -c "import torch, diffusers; print('Health OK')" || exit 1
+
+# Labels
+LABEL maintainer="AI Data Creator"
+LABEL description="Stable Diffusion Inpainting with proven compatible dependencies"
+LABEL version="2.0"

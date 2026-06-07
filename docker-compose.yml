@@ -1,0 +1,4 @@
+# Repository-root entrypoint for Docker Compose (see dockers/).
+# Requires Docker Compose v2.24+ (include).
+include:
+  - path: dockers/docker-compose.yml

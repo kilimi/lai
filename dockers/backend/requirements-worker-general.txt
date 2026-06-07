@@ -1,0 +1,2 @@
+# CPU / I/O Celery worker (no torch, no ultralytics)
+-r requirements-worker-base.txt

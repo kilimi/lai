@@ -1,0 +1,13 @@
+flask
+werkzeug<3.0  # Pin to 2.x to avoid trusted host issues in Docker
+pillow
+numpy<2
+opencv-python-headless
+gunicorn
+requests
+huggingface_hub
+einops
+decord
+pycocotools
+# SAM-2 and sam3 are installed from requirements-git.txt with --no-build-isolation
+# (see Dockerfile) to avoid pip build-isolation failing to build SAM-2.

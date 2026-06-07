@@ -1,0 +1,120 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+backend_debug.log
+backend/backups/
+node_modules
+backend/.bash_history
+# Local Docker / data (compose defaults)
+.lai-data/
+.lai/
+
+# Never commit a virtualenv inside the `lai` Python package directory
+lai/bin/
+lai/lib/
+lai/include/
+lai/lib64/
+lai/pyvenv.cfg
+lai/share/
+
+# Generated compose bundle for PyPI wheel (scripts/build_dist_bundle.sh)
+lai/bundle/
+
+dist
+dist-ssr
+*.local
+*.onnx
+*.pt
+*.engine
+dockers/backend/wheels/*.whl
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.vs/
+*.vsidx
+*.wsuo
+
+# Python
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+.Python
+.env
+.env.*
+.venv/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+.cache
+
+# Backend runtime data & caches
+backend/data/
+backend/projects/
+backend/sam_service/models/*.pt
+backend/migrations/__pycache__/
+backend/**/__pycache__/
+backend/celerybeat-schedule
+backend/celerybeat-schedule.*
+backend/static/inference_results/
+backend/.fiftyone/
+backend/*.db
+backend/*.sqlite*
+backend/ai_models/
+backend/static/*
+backend/runs/*
+backend/python_scripts/data/
+
+*.db
+*.sqlite*
+*.sqlite
+*.sqlite3
+*.db-journal
+
+# Temp
+*.tmp
+*.temp
+*.bak
+*.backup
+*~
+Thumbs.db
+
+# Docker local overrides
+docker-compose.override.yml
+
+# App uploads (if created at repo root)
+/projects/
+annotations/
+augmented_datasets/
+uploads/
+temp_uploads/
+
+# Coverage / CI artifacts
+coverage/
+.nyc_output/
+*.lcov
+
+# Build
+build/
+*.egg-info/
+out/
+.next/

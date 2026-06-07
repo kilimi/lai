@@ -1,0 +1,301 @@
+# Backend stack fragment. Dockerfiles + pip lockfiles: dockers/backend/; app code context: ../../backend.
+# Included from dockers/docker-compose.yml (or repo-root docker-compose.yml via include).
+name: lai
+
+x-app-build: &app_build
+  context: ../../backend
+  dockerfile: ../dockers/backend/Dockerfile
+  additional_contexts:
+    docker_deps: .
+
+services:
+  backend:
+    image: ${LAI_BACKEND_IMAGE:-lai-backend:local}
+    build:
+      <<: *app_build
+      args:
+        # MMYOLO stack copied from lai-mmyolo image (build mmyolo_runtime before backend).
+        MMYOLO_IMAGE: ${LAI_MMYOLO_IMAGE:-lai-mmyolo:local}
+    volumes:
+      # Host backend code: optional bind via repo-root docker-compose.code-mount.yml + COMPOSE_FILE (see install.sh).
+      # Host data root: set LAI_DATA_DIR via scripts/install.sh (default ../../.lai-data relative to this file = repo .lai-data)
+      - ${LAI_DATA_DIR:-../../.lai-data}/projects:/app/projects
+      - ${LAI_DATA_DIR:-../../.lai-data}/data:/app/data
+      - ${BACKUP_PATH:-${LAI_DATA_DIR:-../../.lai-data}/backups}:/app/backups
+      - ${LAI_DATA_DIR:-../../.lai-data}/runs:/app/runs
+      - ${LAI_DATA_DIR:-../../.lai-data}/cache/backend:/app/.cache
+      # Foundation model weights — populated by `make download-models` (slim image keeps it empty).
+      - ${LAI_DATA_DIR:-../../.lai-data}/models:/app/models
+      - ${LAI_DATA_DIR:-../../.lai-data}/ai_models:/app/ai_models
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db/lai_db
+      - ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173,http://localhost:${WEB_PORT:-8089},http://127.0.0.1:${WEB_PORT:-8089}
+      - SERVICE_TYPE=main
+      - REDIS_URL=redis://redis:6379/0
+      - USE_CELERY=true
+      - LAI_DB_AUTO_CREATE=false
+      - LAI_RUN_MIGRATIONS=true
+      - XDG_CACHE_HOME=/app/.cache
+      - MIM_CACHE_DIR=/app/.cache/mim
+      - FIFTYONE_DATABASE_URI=mongodb://mongodb:27017
+      - FIFTYONE_DEFAULT_APP_PORT=5151
+      - FIFTYONE_DEFAULT_APP_ADDRESS=0.0.0.0
+    ports:
+      - "9999:8000"
+      - "5151:5151"  # FiftyOne UI
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mongodb:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health-check"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: "2.0"
+        reservations:
+          memory: 1G
+          cpus: "1.0"
+
+  # Build-only ML runtime images (not started on `docker compose up`).
+  ultralytics_runtime:
+    image: ${LAI_ULTRALYTICS_IMAGE:-lai-ultralytics:local}
+    build:
+      context: .
+      dockerfile: Dockerfile.ultralytics.runtime
+    profiles: [build]
+
+  mmyolo_runtime:
+    image: ${LAI_MMYOLO_IMAGE:-lai-mmyolo:local}
+    build:
+      context: .
+      dockerfile: Dockerfile.mmyolo.runtime
+    profiles: [build]
+
+  # CPU worker: dataset duplicate, augmentation, annotations, depth ONNX, Celery Beat schedules
+  worker-general:
+    image: ${LAI_WORKER_GENERAL_IMAGE:-lai-worker-general:local}
+    build:
+      <<: *app_build
+      dockerfile: ../dockers/backend/Dockerfile.worker-general
+    command: python -m celery -A app.celery.general_app worker -Q general -c 2 --loglevel=info
+    volumes: &worker_volumes
+      - ${LAI_DATA_DIR:-../../.lai-data}/projects:/app/projects
+      - ${LAI_DATA_DIR:-../../.lai-data}/data:/app/data
+      - ${LAI_DATA_DIR:-../../.lai-data}/backups:/app/backups
+      - ${LAI_DATA_DIR:-../../.lai-data}/runs:/app/runs
+      - ${LAI_DATA_DIR:-../../.lai-data}/models:/app/models
+      - ${LAI_DATA_DIR:-../../.lai-data}/ai_models:/app/ai_models
+    environment: &worker_env
+      - DATABASE_URL=postgresql://postgres:postgres@db/lai_db
+      - REDIS_URL=redis://redis:6379/0
+      - LAI_STALE_TASK_TIMEOUT_HOURS=${LAI_STALE_TASK_TIMEOUT_HOURS:-12}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'celery.*worker' > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+  # GPU worker: YOLO train/eval/export, auto-annotate, MMYOLO (subprocess)
+  # Profile ``gpu`` — enable with COMPOSE_PROFILES=gpu or lai install GPU tier.
+  worker-gpu:
+    profiles: [gpu]
+    image: ${LAI_WORKER_GPU_IMAGE:-lai-worker-gpu:local}
+    build:
+      <<: *app_build
+      dockerfile: ../dockers/backend/Dockerfile.worker-gpu
+      args:
+        ULTRALYTICS_IMAGE: ${LAI_ULTRALYTICS_IMAGE:-lai-ultralytics:local}
+        MMYOLO_IMAGE: ${LAI_MMYOLO_IMAGE:-lai-mmyolo:local}
+    command:
+      - sh
+      - -c
+      - |
+        export CUDA_VISIBLE_DEVICES=$${CUDA_VISIBLE_DEVICES:-0}
+        export PYTHONPATH=/opt/lai/lib/python3.10/site-packages
+        export PYTHONNOUSERSITE=1
+        exec /opt/conda/bin/python -m celery -A app.celery.gpu_app worker -Q gpu,mmyolo -c 1 --pool=solo --loglevel=info
+    volumes:
+      - ${LAI_DATA_DIR:-../../.lai-data}/projects:/app/projects
+      - ${LAI_DATA_DIR:-../../.lai-data}/data:/app/data
+      - ${LAI_DATA_DIR:-../../.lai-data}/backups:/app/backups
+      - ${LAI_DATA_DIR:-../../.lai-data}/runs:/app/runs
+      - ${LAI_DATA_DIR:-../../.lai-data}/cache/worker_gpu:/app/.cache
+      - ${LAI_DATA_DIR:-../../.lai-data}/models:/app/models
+      - ${LAI_DATA_DIR:-../../.lai-data}/ai_models:/app/ai_models
+      # Host tests for GPU training smoke (pytest); path relative to this compose file
+      - ../../tests:/tests:ro
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db/lai_db
+      - REDIS_URL=redis://redis:6379/0
+      - PYTHONPATH=/opt/lai/lib/python3.10/site-packages
+      - PYTHONNOUSERSITE=1
+      - XDG_CACHE_HOME=/app/.cache
+      - MIM_CACHE_DIR=/app/.cache/mim
+      - ULTRALYTICS_PYTHON=/opt/conda/bin/python
+      - ULTRALYTICS_SITE=/opt/ultralytics-site
+      - MMYOLO_PYTHON=/opt/conda/envs/mmyolo/bin/python
+      - NVIDIA_VISIBLE_DEVICES=all
+      - CUDA_VISIBLE_DEVICES=0
+      - LAI_EVAL_HALF=${LAI_EVAL_HALF:-1}
+      - LAI_EVAL_IMGSZ=${LAI_EVAL_IMGSZ:-640}
+      - LAI_EVAL_BATCH=${LAI_EVAL_BATCH:-}
+      - LAI_EVAL_BATCH_MAX=${LAI_EVAL_BATCH_MAX:-512}
+      - LAI_EVAL_DEVICE=${LAI_EVAL_DEVICE:-}
+      - LAI_EVAL_DECODE_WORKERS=${LAI_EVAL_DECODE_WORKERS:-8}
+      - LAI_EVAL_PREFETCH_CHUNKS=${LAI_EVAL_PREFETCH_CHUNKS:-2}
+      - LAI_STALE_TASK_TIMEOUT_HOURS=${LAI_STALE_TASK_TIMEOUT_HOURS:-12}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    shm_size: '8gb'
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'celery.*worker' > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    runtime: nvidia
+    restart: unless-stopped
+
+  celery-beat:
+    image: ${LAI_WORKER_GENERAL_IMAGE:-lai-worker-general:local}
+    command: python -m celery -A app.celery.general_app beat --loglevel=info
+    volumes: *worker_volumes
+    environment: *worker_env
+    depends_on:
+      redis:
+        condition: service_healthy
+      worker-general:
+        condition: service_started
+    restart: unless-stopped
+
+  # Celery Flower - Web UI for monitoring tasks
+  flower:
+    image: ${LAI_WORKER_GENERAL_IMAGE:-lai-worker-general:local}
+    command: python -m celery -A app.celery.general_app flower --port=5555
+    ports:
+      - "5555:5555"
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+      worker-general:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'celery.*flower' > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+  # Redis for Celery broker and result backend
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - ${LAI_DATA_DIR:-../../.lai-data}/redis:/data
+    command: redis-server --appendonly yes --bind 0.0.0.0
+    healthcheck:
+      test: ["CMD", "redis-cli", "-h", "127.0.0.1", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  # MongoDB for FiftyOne
+  mongodb:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    volumes:
+      - ${LAI_DATA_DIR:-../../.lai-data}/mongodb:/data/db
+    restart: unless-stopped
+
+  # SAM 2/3 service: needs the same GPU exposure as `backend` (runtime + NVIDIA_* env).
+  # Requires: NVIDIA Container Toolkit (`nvidia-smi` in container). Do not set SAM_FORCE_CPU when using GPU.
+  # Profile ``gpu`` — optional; CPU-only installs skip this service.
+  sam_service:
+    profiles: [gpu]
+    image: ${LAI_SAM_IMAGE:-lai-sam:local}
+    build:
+      context: ../../backend/sam_service
+      dockerfile: ../../dockers/sam/Dockerfile
+      additional_contexts:
+        docker_deps: ../../dockers/sam
+    runtime: nvidia
+    environment:
+      - PYTHONUNBUFFERED=1
+      - HF_TOKEN=${HF_TOKEN:-}
+      - SAM3_CHECKPOINT_PATH=/models/sam3/${SAM3_CHECKPOINT_FILENAME:-sam3.pt}
+      - SAM3_ALLOW_HF_DOWNLOAD=${SAM3_ALLOW_HF_DOWNLOAD:-false}
+      # true = force CPU only (skip if you want GPU)
+      - SAM_FORCE_CPU=${SAM_FORCE_CPU:-false}
+      - WERKZEUG_RUN_MAIN=true
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      # Match worker-gpu: explicit index avoids PyTorch seeing no device / CUDA init quirks
+      - CUDA_VISIBLE_DEVICES=0
+    volumes:
+      - ${SAM3_MODELS_HOST_PATH:-../../backend/sam_service/models}:/models/sam3:ro
+    ports:
+      - "8081:8081"
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+          cpus: "4.0"
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  db:
+    image: postgres:15
+    volumes:
+      - ${LAI_DATA_DIR:-../../.lai-data}/postgres:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=lai_db
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+# Data lives under LAI_DATA_DIR (default: ../../.lai-data from this file). Run scripts/install.sh to pick a folder.

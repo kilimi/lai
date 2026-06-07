@@ -1,0 +1,26 @@
+# Full stack: backend services (dockers/backend/docker-compose.yml) + web UI.
+# Requires Docker Compose v2.24+ (include).
+#
+# Local build (default): docker compose up -d  (from repository root)
+# Pre-built images: set LAI_*_IMAGE in .env, then docker compose pull && docker compose up -d --no-build
+#
+# Project name → container names like lai-backend-1. Override: COMPOSE_PROJECT_NAME.
+name: lai
+
+include:
+  - path: backend/docker-compose.yml
+
+services:
+  web:
+    image: ${LAI_FRONTEND_IMAGE:-lai-frontend:local}
+    build:
+      context: ..
+      dockerfile: dockers/frontend/Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-SAME_ORIGIN}
+    ports:
+      - "${WEB_PORT:-8089}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped

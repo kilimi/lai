@@ -1,0 +1,19 @@
+# Optional fragment: bind-mount host backend source over /app (live editing).
+# Listed first in COMPOSE_FILE so this volume merges before the main file (correct /app then /app/backups order).
+# install.sh sets when bind-code is enabled:
+#   COMPOSE_FILE=docker-compose.code-mount.yml;docker-compose.yml  (Windows; use ':' on Linux/macOS)
+#   LAI_REPO_ROOT=/absolute/path/to/this/repo
+services:
+  backend:
+    volumes:
+      - ${LAI_REPO_ROOT}/backend:/app
+  worker-general:
+    volumes:
+      - ${LAI_REPO_ROOT}/backend:/app
+  worker-gpu:
+    volumes:
+      - ${LAI_REPO_ROOT}/backend:/app
+      - ${LAI_REPO_ROOT}/tests:/tests:ro
+  celery-beat:
+    volumes:
+      - ${LAI_REPO_ROOT}/backend:/app

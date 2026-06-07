@@ -1,0 +1,46 @@
+# CI override for the backend stack.
+#
+# Used together with dockers/backend/docker-compose.yml to spin up just enough of the
+# backend in GitHub Actions to run the Playwright marketing tour.
+#
+# Differences from the dev compose file:
+#   - No GPU (`runtime: nvidia` and `deploy.resources` GPU reservations removed)
+#   - No worker-general / worker-gpu / flower / sam_service (marketing tour uses USE_CELERY=false)
+#   - Restart policy set to "no" so failures surface immediately
+#
+# Usage:
+#   docker compose -f dockers/backend/docker-compose.yml -f dockers/backend/docker-compose.ci.yml \
+#                  up -d --build db redis mongodb backend
+
+name: lai
+
+services:
+  backend:
+    runtime: ~
+    deploy: !reset null
+    restart: "no"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db/lai_db
+      - ALLOWED_ORIGINS=http://localhost:8080,http://127.0.0.1:8080
+      - SERVICE_TYPE=main
+      - REDIS_URL=redis://redis:6379/0
+      - USE_CELERY=false
+      - FIFTYONE_DATABASE_URI=mongodb://mongodb:27017
+      - FIFTYONE_DEFAULT_APP_PORT=5151
+      - FIFTYONE_DEFAULT_APP_ADDRESS=0.0.0.0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mongodb:
+        condition: service_started
+
+  db:
+    restart: "no"
+
+  redis:
+    restart: "no"
+
+  mongodb:
+    restart: "no"

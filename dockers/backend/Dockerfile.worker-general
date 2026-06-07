@@ -1,0 +1,36 @@
+# syntax=docker/dockerfile:1.4
+# CPU Celery worker: dataset duplicate, augmentation, annotations, depth ONNX, beat.
+FROM python:3.10-slim AS builder
+
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        gcc g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+COPY --from=docker_deps requirements-worker-general.txt requirements-worker-base.txt ./
+RUN pip install --upgrade pip \
+ && pip install --prefix=/install -r requirements-worker-general.txt
+
+FROM python:3.10-slim AS runtime
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/opt/lai/lib/python3.10/site-packages \
+    PATH=/opt/lai/bin:$PATH \
+    PYTHONNOUSERSITE=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libgl1 libglib2.0-0 libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY --from=builder /install /opt/lai
+COPY . .
+
+RUN mkdir -p /app/projects /app/data /app/models /app/ai_models/depth_estimation /app/runs
+
+CMD ["python", "-m", "celery", "-A", "app.celery.general_app", "worker", "-Q", "general", "-c", "2", "--loglevel=info"]

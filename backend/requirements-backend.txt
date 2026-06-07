@@ -1,0 +1,3 @@
+# Host / API container deps (same pins as the Docker image).
+# Canonical lockfile for images: ../dockers/backend/requirements-api.txt
+-r ../dockers/backend/requirements-api.txt

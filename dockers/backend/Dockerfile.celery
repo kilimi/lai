@@ -1,0 +1,49 @@
+# syntax=docker/dockerfile:1.4
+# GPU Celery worker: merges Ultralytics + MMYOLO runtime images on a shared PyTorch CUDA base.
+# Build order:
+#   docker compose build ultralytics_runtime mmyolo_runtime
+#   docker compose build celery_worker
+#   docker compose build backend
+
+ARG ULTRALYTICS_IMAGE=lai-ultralytics:local
+ARG MMYOLO_IMAGE=lai-mmyolo:local
+
+FROM ${ULTRALYTICS_IMAGE} AS ultralytics
+FROM ${MMYOLO_IMAGE} AS mmyolo
+
+FROM pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONNOUSERSITE=1 \
+    PYTHONPATH=/opt/celery/lib/python3.10/site-packages \
+    ULTRALYTICS_PYTHON=/opt/conda/bin/python \
+    ULTRALYTICS_SITE=/opt/ultralytics-site \
+    MMYOLO_PYTHON=/opt/conda/envs/mmyolo/bin/python \
+    PATH=/opt/celery/bin:/opt/conda/bin:$PATH
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 libgomp1 \
+        libfontconfig1 libice6 git curl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ultralytics /opt/ultralytics-site /opt/ultralytics-site
+COPY --from=mmyolo /opt/conda /opt/conda
+COPY --from=mmyolo /opt/mmyolo /opt/mmyolo
+
+WORKDIR /app
+
+COPY --from=docker_deps requirements-celery.txt .
+RUN pip install --no-cache-dir --upgrade pip \
+ && pip install --no-cache-dir --prefix=/opt/celery -r requirements-celery.txt
+
+COPY . .
+
+RUN mkdir -p /app/projects /app/data /app/models /app/ai_models/depth_estimation /app/runs /app/backups
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD pgrep -f 'celery.*worker' > /dev/null || exit 1
+
+CMD ["python", "-m", "celery", "-A", "app.celery_app", "worker", \
+     "-Q", "training,ultralytics,mmyolo", "--loglevel=info", "--concurrency=1", "--pool=solo"]

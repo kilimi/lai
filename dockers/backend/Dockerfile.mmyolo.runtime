@@ -1,0 +1,77 @@
+# MMYOLO GPU runtime (artifact image; merged into lai-celery and copied into lai-backend).
+# No download.openmmlab.com — mim install mmcv uses that CDN and fails when OpenMMLab is down.
+# Sources: PyPI (mmengine, mmdet), GitHub (mmcv source, mmyolo), optional wheels/ offline.
+
+FROM nvidia/cuda:11.3.1-devel-ubuntu20.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONNOUSERSITE=1 \
+    MMYOLO_ENV=/opt/conda/envs/mmyolo \
+    MMYOLO_PYTHON=/opt/conda/envs/mmyolo/bin/python \
+    PIP_DEFAULT_TIMEOUT=120 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    CUDA_HOME=/usr/local/cuda \
+    LD_LIBRARY_PATH=/usr/local/cuda/lib64:${LD_LIBRARY_PATH} \
+    FORCE_CUDA=1 \
+    MMCV_WITH_OPS=1 \
+    TORCH_CUDA_ARCH_LIST="7.0 7.5 8.0 8.6+PTX" \
+    PATH=/opt/conda/bin:$PATH
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates wget git \
+        libgl1 libglib2.0-0 libgomp1 \
+        build-essential ninja-build \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN wget -q https://repo.anaconda.com/miniconda/Miniconda3-py39_24.1.2-0-Linux-x86_64.sh -O /tmp/miniconda.sh \
+ && bash /tmp/miniconda.sh -b -p /opt/conda \
+ && rm /tmp/miniconda.sh \
+ && /opt/conda/bin/conda clean -afy
+
+ARG MMCV_VERSION=2.0.1
+ARG MMCV_BUILD_JOBS=2
+COPY wheels /wheels
+
+RUN conda create -n mmyolo python=3.8 -y
+
+RUN PYTHONPATH= ${MMYOLO_ENV}/bin/pip install --no-cache-dir --upgrade pip setuptools wheel \
+ && PYTHONPATH= ${MMYOLO_ENV}/bin/pip install --no-cache-dir \
+        torch==1.10.1+cu113 torchvision==0.11.2+cu113 \
+        -f https://download.pytorch.org/whl/cu113/torch_stable.html
+
+# openmim on PyPI only — needed at runtime for `python -m mim run mmyolo train` (no OpenMMLab download).
+RUN PYTHONPATH= ${MMYOLO_ENV}/bin/pip install --no-cache-dir openmim
+
+RUN if ls /wheels/mmengine-*.whl >/dev/null 2>&1; then \
+        PYTHONPATH= ${MMYOLO_ENV}/bin/pip install --no-cache-dir /wheels/mmengine-*.whl; \
+    else \
+        PYTHONPATH= ${MMYOLO_ENV}/bin/pip install --no-cache-dir "mmengine==0.10.6"; \
+    fi
+
+RUN if ls /wheels/mmcv-*.whl >/dev/null 2>&1; then \
+        echo "Installing mmcv from wheels/ (offline)"; \
+        PYTHONPATH= ${MMYOLO_ENV}/bin/pip install --no-cache-dir /wheels/mmcv-*.whl; \
+    else \
+        echo "Building mmcv v${MMCV_VERSION} from GitHub (no OpenMMLab CDN; 20-60+ min)"; \
+        git clone --depth 1 --branch "v${MMCV_VERSION}" https://github.com/open-mmlab/mmcv.git /tmp/mmcv \
+        && MAX_JOBS=${MMCV_BUILD_JOBS} PYTHONPATH= ${MMYOLO_ENV}/bin/pip install --no-cache-dir \
+            --no-build-isolation -v /tmp/mmcv \
+        && rm -rf /tmp/mmcv; \
+    fi
+
+RUN PYTHONPATH= ${MMYOLO_ENV}/bin/pip install --no-cache-dir "mmdet==3.1.0"
+
+RUN git clone --depth 1 https://github.com/open-mmlab/mmyolo.git /opt/mmyolo
+
+RUN PYTHONPATH= ${MMYOLO_ENV}/bin/pip install --no-cache-dir -r /opt/mmyolo/requirements/albu.txt
+
+RUN PYTHONPATH= ${MMYOLO_ENV}/bin/pip install --no-cache-dir -e /opt/mmyolo
+
+RUN ${MMYOLO_PYTHON} -c "import mmengine, mmcv, mmdet, mmyolo; print('mmyolo stack ok', mmcv.__version__)"
+
+RUN env -u PYTHONPATH GLIBC_TUNABLES=glibc.rtld.execstack=2 \
+    ${MMYOLO_PYTHON} -c "import torch; from mmdet.apis import init_detector; print('mmyolo torch ok', torch.__version__)"
+
+CMD ["sleep", "infinity"]

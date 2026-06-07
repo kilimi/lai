@@ -1,0 +1,51 @@
+# Ultralytics YOLO / RT-DETR GPU runtime (artifact image; merged into lai-celery).
+# PyTorch + NumPy 1.x come from the base conda env — ultralytics deps use --target only.
+
+FROM pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONNOUSERSITE=1 \
+    ULTRALYTICS_PYTHON=/opt/conda/bin/python \
+    ULTRALYTICS_SITE=/opt/ultralytics-site
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libgl1 libglib2.0-0 libgomp1 git \
+        fontconfig fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
+
+# Pin NumPy 1.x for PyTorch 2.1 (base image may ship NumPy 2.x).
+RUN conda install -y -c conda-forge 'numpy>=1.23.0,<2'
+
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
+ && pip install --no-cache-dir --target="${ULTRALYTICS_SITE}" \
+        'ultralytics>=8.4.0,<8.5.0' --no-deps \
+ && pip install --no-cache-dir --target="${ULTRALYTICS_SITE}" \
+        'opencv-python-headless>=4.7.0' \
+        'matplotlib>=3.3.0' 'pillow>=7.1.2' 'pyyaml>=5.3.1' 'requests>=2.23.0' \
+        'scipy>=1.4.1' 'psutil' 'polars' 'pandas>=1.1.4' 'ultralytics-thop>=2.0.0' \
+        'onnx>=1.12.0,<2' 'onnxsim>=0.4.33' \
+ && rm -rf \
+        "${ULTRALYTICS_SITE}"/numpy "${ULTRALYTICS_SITE}"/numpy-* \
+        "${ULTRALYTICS_SITE}"/numpy.libs \
+        "${ULTRALYTICS_SITE}"/torch "${ULTRALYTICS_SITE}"/torch-* \
+        "${ULTRALYTICS_SITE}"/torchvision "${ULTRALYTICS_SITE}"/torchvision-* \
+        "${ULTRALYTICS_SITE}"/torchaudio "${ULTRALYTICS_SITE}"/torchaudio-* \
+        "${ULTRALYTICS_SITE}"/functorch "${ULTRALYTICS_SITE}"/functorch-* \
+        "${ULTRALYTICS_SITE}"/nvidia "${ULTRALYTICS_SITE}"/nvidia_* \
+        "${ULTRALYTICS_SITE}"/cuda "${ULTRALYTICS_SITE}"/cuda_* \
+        "${ULTRALYTICS_SITE}"/triton "${ULTRALYTICS_SITE}"/triton-* \
+    2>/dev/null || true
+
+RUN PYTHONPATH="/opt/conda/lib/python3.10/site-packages:${ULTRALYTICS_SITE}" MPLBACKEND=Agg /opt/conda/bin/python -c "\
+import numpy as np; import pandas as pd; import torch; import ultralytics; import onnx; \
+from ultralytics import YOLO; from ultralytics.nn.modules.block import C3k2; \
+from packaging.version import Version; \
+assert Version(ultralytics.__version__) >= Version('8.4.0'), ultralytics.__version__; \
+assert 'ultralytics-site' in torch.__file__ or 'conda' in torch.__file__; \
+torch.from_numpy(np.zeros((1, 3, 64, 64), dtype=np.float32)); \
+import matplotlib.pyplot as plt; plt.figure(); plt.close(); \
+print('ultralytics-site ok', ultralytics.__version__, np.__version__, torch.__version__, pd.__version__, onnx.__version__)"
+
+CMD ["sleep", "infinity"]

@@ -1,0 +1,4 @@
+# Installed in Dockerfile with: pip install --no-build-isolation -r requirements-git.txt
+# (after requirements.txt). SAM2_BUILD_CUDA=0 is set in the Dockerfile ENV.
+SAM-2 @ git+https://github.com/facebookresearch/sam2.git
+sam3 @ git+https://github.com/facebookresearch/sam3.git
