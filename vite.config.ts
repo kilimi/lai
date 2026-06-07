@@ -68,6 +68,7 @@ export default defineConfig(async ({ mode }) => {
     fs.readFileSync(path.join(__dirname, "package.json"), "utf8"),
   ) as { version?: string };
   const appVersion = process.env.VITE_APP_VERSION || pkg.version || "dev";
+  const isCI = Boolean(process.env.CI);
   
   return {
     define: {
@@ -146,6 +147,13 @@ export default defineConfig(async ({ mode }) => {
       include: ["src/**/*.{test,spec}.{ts,tsx}"],
       exclude: ["tests/**", "node_modules/**", "dist/**"],
       silent: true,
+      // CI runners (GitHub/GitLab) OOM with default parallel jsdom + v8 coverage.
+      ...(isCI && {
+        pool: "forks",
+        maxWorkers: 2,
+        minWorkers: 1,
+        fileParallelism: false,
+      }),
     },
   };
 });
