@@ -147,12 +147,13 @@ export default defineConfig(async ({ mode }) => {
       include: ["src/**/*.{test,spec}.{ts,tsx}"],
       exclude: ["tests/**", "node_modules/**", "dist/**"],
       silent: true,
-      // CI runners (GitHub/GitLab) OOM with default parallel jsdom + v8 coverage.
+      // CI runners (~7 GB RAM) OOM with parallel jsdom workers (each can use ~4 GB).
       ...(isCI && {
         pool: "forks",
-        maxWorkers: 2,
+        maxWorkers: 1,
         minWorkers: 1,
         fileParallelism: false,
+        sequence: { concurrent: false },
       }),
     },
   };
