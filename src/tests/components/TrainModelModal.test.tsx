@@ -726,10 +726,19 @@ describe("TrainModelModal", () => {
 
     it("sends correct YOLO model_type based on version + size + task selection", async () => {
       const user = userEvent.setup({ delay: null, pointerEventsCheck: 0 });
+      mockApi.getAnnotations.mockResolvedValue({
+        success: true,
+        data: [{ id: "ann1", name: "masks.json", type: "Segmentation (mask)" }],
+      });
       renderModal();
 
+      // Task first (clears model), then re-pick YOLO so modelSettings.task = segmentation.
       await user.click(screen.getByRole("button", { name: /segmentation/i }));
-      await navigateToDatasetsWithSelection(user);
+      await selectYoloModel(user);
+      await goToDatasetsStepWithModelSelected(user);
+      await addSingleDataset(user);
+      await flushMicrotasks();
+      await waitFor(() => expect(mockApi.getAnnotations).toHaveBeenCalled());
       await goToOptionsStep(user);
 
       // yolo11 / n / segmentation → yolo11n-seg.pt

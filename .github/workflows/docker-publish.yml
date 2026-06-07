@@ -141,7 +141,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          additional-contexts: |
+          build-contexts: |
             docker_deps=./dockers/backend
           build-args: |
             ULTRALYTICS_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/lai-ultralytics:${{ needs.prepare.outputs.docker_tag }}
@@ -172,7 +172,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          additional-contexts: |
+          build-contexts: |
             docker_deps=./dockers/backend
 
   publish-web:
@@ -229,5 +229,5 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          additional-contexts: |
+          build-contexts: |
             docker_deps=./dockers/sam

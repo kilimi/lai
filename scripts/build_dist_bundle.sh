@@ -6,9 +6,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION="${1:-$(python3 -c 'import lai; print(lai.__version__)' 2>/dev/null || echo 0.1.0)}"
 VERSION="${VERSION#v}"
-OUT_DIR="${ROOT}/dist"
-ARCHIVE="${OUT_DIR}/lai-dist-${VERSION}.tar.gz"
-STAGE="${OUT_DIR}/lai-dist-${VERSION}"
+# Keep bundle staging out of dist/ so twine upload dist/* does not pick up lai-dist-*.
+BUNDLE_DIR="${ROOT}/build/release"
+ARCHIVE="${BUNDLE_DIR}/lai-dist-${VERSION}.tar.gz"
+STAGE="${BUNDLE_DIR}/lai-dist-${VERSION}"
 EMBED="${ROOT}/lai/bundle"
 
 REGISTRY="${LAI_REGISTRY:-docker.io}"
@@ -66,7 +67,7 @@ EOF
 populate_stage "$STAGE"
 populate_stage "$EMBED"
 
-mkdir -p "$OUT_DIR"
-tar -czf "$ARCHIVE" -C "$OUT_DIR" "lai-dist-${VERSION}"
+mkdir -p "$BUNDLE_DIR"
+tar -czf "$ARCHIVE" -C "$BUNDLE_DIR" "lai-dist-${VERSION}"
 echo "Created $ARCHIVE"
 echo "Embedded wheel bundle at $EMBED"

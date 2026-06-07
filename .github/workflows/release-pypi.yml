@@ -43,7 +43,10 @@ jobs:
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
-        run: twine upload dist/lai-*
+        run: |
+          twine upload \
+            "dist/lai-${{ inputs.release_version }}-py3-none-any.whl" \
+            "dist/lai-${{ inputs.release_version }}.tar.gz"
 
       - name: Smoke check bundle in wheel
         run: |

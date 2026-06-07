@@ -1,7 +1,7 @@
 """
 Background work dispatch policy (P0 guardrails).
 
-Production: Celery workers (`worker-general`, `worker-gpu`). See docs/BACKGROUND_TASKS.md.
+Production: Celery workers (`worker-general`, `worker-gpu`).
 
 Inline execution in the API process (FastAPI ``BackgroundTasks`` or synchronous task
 calls) is disabled unless ``LAI_ALLOW_INLINE_TASKS=true`` (local dev only).
@@ -40,7 +40,6 @@ def ensure_inline_dispatch_allowed(feature: str) -> None:
         detail=(
             f"{feature} requires Celery workers. "
             "Run the stack with `lai up` (includes worker-general and worker-gpu). "
-            "See docs/BACKGROUND_TASKS.md. "
             "For single-process local experiments only, set LAI_ALLOW_INLINE_TASKS=true."
         ),
     )

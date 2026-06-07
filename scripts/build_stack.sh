@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build ML runtime images and application workers in dependency order.
-# Replaces the old monolithic celery_worker service (see docs/WORKERS.md).
+# Replaces the old monolithic celery_worker service.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

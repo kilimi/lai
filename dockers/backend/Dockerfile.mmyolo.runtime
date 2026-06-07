@@ -16,7 +16,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     LD_LIBRARY_PATH=/usr/local/cuda/lib64:${LD_LIBRARY_PATH} \
     FORCE_CUDA=1 \
     MMCV_WITH_OPS=1 \
-    TORCH_CUDA_ARCH_LIST="6.0 6.1 7.0 7.5 8.0 8.6 8.9+PTX" \
+    TORCH_CUDA_ARCH_LIST="6.0 6.1 7.0 7.5 8.0 8.6+PTX" \
     PATH=/opt/conda/bin:$PATH
 
 RUN apt-get update && apt-get install -y --no-install-recommends \

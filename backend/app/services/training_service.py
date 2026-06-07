@@ -45,7 +45,7 @@ def dispatch_training(
 
         raise HTTPException(
             status_code=503,
-            detail=f"{feature_name} requires Celery workers (worker-gpu). See docs/BACKGROUND_TASKS.md.",
+            detail=f"{feature_name} requires Celery workers (worker-gpu). Run `lai up` with worker-gpu enabled.",
         )
 
     logger.info("Queuing Celery training for task %s (framework=%s)", task.id, framework_id)

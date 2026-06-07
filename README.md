@@ -49,13 +49,11 @@ Uses Vite (see `package.json`). The full app runs in Docker via `lai up`.
 
 ## Background workers
 
-CPU tasks (`worker-general`) and GPU tasks (`worker-gpu`) use separate Docker images and Celery queues. See [docs/WORKERS.md](docs/WORKERS.md) and [docs/BACKGROUND_TASKS.md](docs/BACKGROUND_TASKS.md) (production requires Celery workers).
+CPU tasks (`worker-general`) and GPU tasks (`worker-gpu`) use separate Docker images and Celery queues. Production requires Celery workers.
 
 ## Database
 
-Schema policy (`LAI_DB_AUTO_CREATE`, Alembic on container start): [docs/DATABASE.md](docs/DATABASE.md).
-
-Service layer map: [docs/BACKGROUND_TASKS.md](docs/BACKGROUND_TASKS.md#service-layer-p1).
+Schema policy: `LAI_DB_AUTO_CREATE` and Alembic migrations run on container start.
 
 ```bash
 docker compose build worker-general worker-gpu
@@ -193,6 +191,6 @@ This project is licensed under the [GNU Affero General Public License v3.0 (AGPL
 | SAM 2 | Apache-2.0 | [licenses/Apache-2.0.txt](licenses/Apache-2.0.txt) |
 | SAM 3 | Meta SAM License | [licenses/SAM-3-Meta.txt](licenses/SAM-3-Meta.txt) |
 
-Full attribution and redistribution notes: [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) and [NOTICE](NOTICE).
+Full attribution and redistribution notes: [licenses/](licenses/) and [NOTICE](NOTICE) (if present).
 
 If you distribute Docker images or releases that bundle these ML runtimes, include the license files above and comply with each upstream license (especially AGPL-3.0 for YOLO, GPL-3.0 for MMYOLO, and Meta’s SAM License for SAM 3).
