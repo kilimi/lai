@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { AppVersionFooter } from "@/components/AppVersionFooter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { ExportProvider } from "@/contexts/ExportContext";
@@ -30,7 +31,7 @@ const ApiSettings = lazyWithReloadRetry(() =>
   "ApiSettings",
 );
 const NotFound = lazyWithReloadRetry(() => import("./pages/NotFound"), "NotFound");
-const HelpPage = lazyWithReloadRetry(() => import("./pages/help/HelpPage"), "HelpPage");
+import { RedirectToTutorials } from "@/components/RedirectToTutorials";
 const Performance = lazyWithReloadRetry(() => import('./pages/Performance'), "Performance");
 const SystemModels = lazyWithReloadRetry(() => import('./pages/SystemModels'), "SystemModels");
 function RouteFallback() {
@@ -105,14 +106,15 @@ const App = () => (
                 <Route path="/datasets/:id/annotate/classification" element={<Classification />} />
                 <Route path="/datasets/:id/annotate/segmentation" element={<ImageAnnotation />} />
                 <Route path="/settings" element={<ApiSettings />} />
-                <Route path="/help" element={<HelpPage />} />
-                <Route path="/help/:slug" element={<HelpPage />} />
+                <Route path="/help" element={<RedirectToTutorials />} />
+                <Route path="/help/:slug" element={<RedirectToTutorials />} />
                 <Route path="/performance" element={<Performance />} />
                 <Route path="/system/models" element={<SystemModels />} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </Suspense>
           </BrowserRouter>
+          <AppVersionFooter />
         </TooltipProvider>
       </ExportProvider>
     </QueryClientProvider>

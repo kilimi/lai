@@ -6,7 +6,6 @@ import { LayoutControls, LayoutType } from "@/components/LayoutControls";
 import { Dataset, ImageCollection } from "@/types";
 import { DatasetInfoBar } from "@/components/DatasetInfoBar";
 import { AutoAnnotateModal } from "@/components/AutoAnnotateModal";
-import { HelpHint } from "@/components/ui/help-hint";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -79,24 +78,6 @@ export function DatasetHeader({
           <h1 className="text-2xl font-bold">
             {isLoading ? 'Loading...' : name}
           </h1>
-          {!isLoading && (
-            <HelpHint ariaLabel="What is the Dataset View?" popover>
-              <div className="space-y-2 text-sm">
-                <p className="font-semibold text-foreground">Dataset View</p>
-                <p>
-                  Browse images, group them into collections, run
-                  Auto-Annotate, and launch annotation sessions. Use the
-                  Actions menu to edit, duplicate or delete the dataset.
-                </p>
-                <Link
-                  to="/help/dataset-view"
-                  className="inline-flex items-center gap-1 text-primary hover:underline font-medium"
-                >
-                  Read the full guide →
-                </Link>
-              </div>
-            </HelpHint>
-          )}
         </div>
         
         <div className="flex items-center gap-2">

@@ -1,24 +1,42 @@
 # Build and push stack images to Docker Hub (for `lai pull` + LAI_*_IMAGE in .env).
-# Tags: semver on version tags (v*); latest on main branch pushes.
+# Manual only: GitHub → Actions → Docker publish → Run workflow.
 name: Docker publish
 
 on:
-  push:
-    branches: [main]
-    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      docker_tag:
+        description: "Docker tag for all lai-* images (e.g. latest, 0.1.0)"
+        required: true
+        default: latest
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: docker-publish-${{ github.workflow }}-${{ github.ref }}
+  group: docker-publish-${{ github.workflow }}-${{ inputs.docker_tag }}
   cancel-in-progress: true
 
 env:
   DOCKERHUB_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+  DOCKER_TAG: ${{ inputs.docker_tag }}
 
 jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      docker_tag: ${{ inputs.docker_tag }}
+      app_version: ${{ steps.ver.outputs.app_version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: ver
+        run: |
+          v="$(grep '^version = ' pyproject.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
+          echo "app_version=${v}" >> "$GITHUB_OUTPUT"
+
   publish-ultralytics:
+    needs: [prepare]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -32,9 +50,7 @@ jobs:
         with:
           images: ${{ secrets.DOCKERHUB_USERNAME }}/lai-ultralytics
           tags: |
-            type=semver,pattern={{version}},event=tag
-            type=semver,pattern={{major}}.{{minor}},event=tag
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ needs.prepare.outputs.docker_tag }}
       - uses: docker/build-push-action@v6
         with:
           context: ./dockers/backend
@@ -46,6 +62,7 @@ jobs:
           cache-to: type=gha,mode=max
 
   publish-mmyolo:
+    needs: [prepare]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -59,9 +76,7 @@ jobs:
         with:
           images: ${{ secrets.DOCKERHUB_USERNAME }}/lai-mmyolo
           tags: |
-            type=semver,pattern={{version}},event=tag
-            type=semver,pattern={{major}}.{{minor}},event=tag
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ needs.prepare.outputs.docker_tag }}
       - uses: docker/build-push-action@v6
         with:
           context: ./dockers/backend
@@ -73,7 +88,7 @@ jobs:
           cache-to: type=gha,mode=max
 
   publish-backend:
-    needs: [publish-mmyolo]
+    needs: [prepare, publish-mmyolo]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -87,16 +102,7 @@ jobs:
         with:
           images: ${{ secrets.DOCKERHUB_USERNAME }}/lai-backend
           tags: |
-            type=semver,pattern={{version}},event=tag
-            type=semver,pattern={{major}}.{{minor}},event=tag
-            type=raw,value=latest,enable={{is_default_branch}}
-      - id: mmyolo_tag
-        run: |
-          if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            echo "tag=${{ secrets.DOCKERHUB_USERNAME }}/lai-mmyolo:${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-          else
-            echo "tag=${{ secrets.DOCKERHUB_USERNAME }}/lai-mmyolo:latest" >> "$GITHUB_OUTPUT"
-          fi
+            type=raw,value=${{ needs.prepare.outputs.docker_tag }}
       - uses: docker/build-push-action@v6
         with:
           context: ./backend
@@ -107,10 +113,11 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
-            MMYOLO_IMAGE=${{ steps.mmyolo_tag.outputs.tag }}
+            MMYOLO_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/lai-mmyolo:${{ needs.prepare.outputs.docker_tag }}
+            LAI_VERSION=${{ needs.prepare.outputs.app_version }}
 
   publish-worker-gpu:
-    needs: [publish-ultralytics, publish-mmyolo]
+    needs: [prepare, publish-ultralytics, publish-mmyolo]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -124,19 +131,7 @@ jobs:
         with:
           images: ${{ secrets.DOCKERHUB_USERNAME }}/lai-worker-gpu
           tags: |
-            type=semver,pattern={{version}},event=tag
-            type=semver,pattern={{major}}.{{minor}},event=tag
-            type=raw,value=latest,enable={{is_default_branch}}
-      - id: rt_tags
-        run: |
-          if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            V="${GITHUB_REF_NAME#v}"
-            echo "ultra=${{ secrets.DOCKERHUB_USERNAME }}/lai-ultralytics:${V}" >> "$GITHUB_OUTPUT"
-            echo "mmyolo=${{ secrets.DOCKERHUB_USERNAME }}/lai-mmyolo:${V}" >> "$GITHUB_OUTPUT"
-          else
-            echo "ultra=${{ secrets.DOCKERHUB_USERNAME }}/lai-ultralytics:latest" >> "$GITHUB_OUTPUT"
-            echo "mmyolo=${{ secrets.DOCKERHUB_USERNAME }}/lai-mmyolo:latest" >> "$GITHUB_OUTPUT"
-          fi
+            type=raw,value=${{ needs.prepare.outputs.docker_tag }}
       - uses: docker/build-push-action@v6
         with:
           context: ./backend
@@ -149,11 +144,11 @@ jobs:
           additional-contexts: |
             docker_deps=./dockers/backend
           build-args: |
-            ULTRALYTICS_IMAGE=${{ steps.rt_tags.outputs.ultra }}
-            MMYOLO_IMAGE=${{ steps.rt_tags.outputs.mmyolo }}
+            ULTRALYTICS_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/lai-ultralytics:${{ needs.prepare.outputs.docker_tag }}
+            MMYOLO_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/lai-mmyolo:${{ needs.prepare.outputs.docker_tag }}
 
   publish-worker-general:
-    needs: [publish-backend]
+    needs: [prepare, publish-backend]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -167,9 +162,7 @@ jobs:
         with:
           images: ${{ secrets.DOCKERHUB_USERNAME }}/lai-worker-general
           tags: |
-            type=semver,pattern={{version}},event=tag
-            type=semver,pattern={{major}}.{{minor}},event=tag
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ needs.prepare.outputs.docker_tag }}
       - uses: docker/build-push-action@v6
         with:
           context: ./backend
@@ -183,6 +176,7 @@ jobs:
             docker_deps=./dockers/backend
 
   publish-web:
+    needs: [prepare]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -196,9 +190,7 @@ jobs:
         with:
           images: ${{ secrets.DOCKERHUB_USERNAME }}/lai-frontend
           tags: |
-            type=semver,pattern={{version}},event=tag
-            type=semver,pattern={{major}}.{{minor}},event=tag
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ needs.prepare.outputs.docker_tag }}
       - uses: docker/build-push-action@v6
         with:
           context: .
@@ -208,9 +200,12 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          build-args: VITE_API_URL=SAME_ORIGIN
+          build-args: |
+            VITE_API_URL=SAME_ORIGIN
+            VITE_APP_VERSION=${{ needs.prepare.outputs.app_version }}
 
   publish-sam:
+    needs: [prepare]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -224,9 +219,7 @@ jobs:
         with:
           images: ${{ secrets.DOCKERHUB_USERNAME }}/lai-sam
           tags: |
-            type=semver,pattern={{version}},event=tag
-            type=semver,pattern={{major}}.{{minor}},event=tag
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ needs.prepare.outputs.docker_tag }}
       - uses: docker/build-push-action@v6
         with:
           context: ./backend/sam_service

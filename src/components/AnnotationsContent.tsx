@@ -7,7 +7,6 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
 import { Upload, Tag, Edit, Trash2, Eye, EyeOff, Download, Square, Loader, Brush, Merge, CheckSquare, X, ImageDown, LayoutGrid, Files, Layers, Hash, Grid3x3 } from "lucide-react";
 import { Link } from "react-router-dom";
-import { HelpHint } from "@/components/ui/help-hint";
 import { AnnotationFileCard, AnnotationFileSkeleton } from "@/components/AnnotationFileCard";
 import { lazyWithReloadRetry } from "@/lib/lazyWithReloadRetry";
 const SplitAnnotationDialog = lazyWithReloadRetry(() => import("@/components/SplitAnnotationDialog").then(m => ({ default: m.SplitAnnotationDialog })), "SplitAnnotationDialog");
@@ -4194,22 +4193,6 @@ export function AnnotationsContent({
         <div className="space-y-2 min-w-0">
           <div className="flex items-center gap-2">
             <h2 className="text-2xl font-bold">Annotation Files</h2>
-            <HelpHint ariaLabel="What are annotation files?" popover>
-              <div className="space-y-2 text-sm">
-                <p className="font-semibold text-foreground">Annotation Files</p>
-                <p>
-                  A dataset can hold many annotation files (COCO format).
-                  Counts below show <strong>files</strong>, total{" "}
-                  <strong>instances</strong> and unique <strong>classes</strong>.
-                </p>
-                <Link
-                  to="/help/annotation-files"
-                  className="inline-flex items-center gap-1 text-primary hover:underline font-medium"
-                >
-                  Read the full guide →
-                </Link>
-              </div>
-            </HelpHint>
           </div>
           {annotationFiles.length > 0 && (() => {
             const totalInstances = annotationFiles.reduce(

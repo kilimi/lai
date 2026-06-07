@@ -14,6 +14,9 @@ backend/.bash_history
 .lai-data/
 .lai/
 
+
+
+
 # Never commit a virtualenv inside the `lai` Python package directory
 lai/bin/
 lai/lib/
@@ -66,7 +69,8 @@ htmlcov/
 .tox/
 .nox/
 .cache
-
+*.pt
+*.pth
 # Backend runtime data & caches
 backend/data/
 backend/projects/

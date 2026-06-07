@@ -3,7 +3,7 @@
  * volume. Tells customers what's installed and how to fetch more.
  */
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { LAI_TUTORIALS_URL } from "@/constants/externalLinks";
 import { Check, Minus, Copy, RefreshCw, HardDrive, Cpu } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -142,7 +142,9 @@ export default function SystemModels() {
             Refresh
           </Button>
           <Button asChild variant="ghost" size="sm">
-            <Link to="/help/foundation-models">Read docs</Link>
+            <a href={LAI_TUTORIALS_URL} target="_blank" rel="noopener noreferrer">
+              Tutorials
+            </a>
           </Button>
         </div>
       </header>

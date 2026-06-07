@@ -52,7 +52,7 @@ async function discoverRoutes(): Promise<Route[]> {
     { name: 'New Project form',     path: '/projects/new', waitFor: 'form, h1' },
     { name: 'New Dataset form',     path: '/datasets/new', waitFor: 'form, h1' },
     { name: 'Settings',             path: '/settings',     waitFor: 'h1, form' },
-    { name: 'Help',                 path: '/help',         waitFor: 'h1, article' },
+    { name: 'Home',                 path: '/',             waitFor: 'h1, main' },
   ];
 
   try {

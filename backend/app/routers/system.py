@@ -218,6 +218,14 @@ def _enrich_gpu_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+@router.get("/system/version")
+async def get_app_version() -> dict[str, str]:
+    """Application release version for the UI footer and diagnostics."""
+    from ..lai_version import lai_version
+
+    return {"version": lai_version()}
+
+
 @router.get("/system/capabilities")
 async def get_capabilities() -> dict[str, Any]:
     """High-level feature flags for the UI (CPU vs GPU tier)."""

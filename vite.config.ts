@@ -64,8 +64,15 @@ const wasmPlugin = () => ({
 // https://vitejs.dev/config/
 export default defineConfig(async ({ mode }) => {
   const { componentTagger } = await import("lovable-tagger");
+  const pkg = JSON.parse(
+    fs.readFileSync(path.join(__dirname, "package.json"), "utf8"),
+  ) as { version?: string };
+  const appVersion = process.env.VITE_APP_VERSION || pkg.version || "dev";
   
   return {
+    define: {
+      "import.meta.env.VITE_APP_VERSION": JSON.stringify(appVersion),
+    },
     server: {
       host: "::",
       port: 8080,

@@ -105,7 +105,9 @@ lai compose -- logs -f backend
 ## Maintainer release (Docker Hub + PyPI)
 
 1. Set GitHub secrets: `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`, `PYPI_API_TOKEN`
-2. Tag a release: `git tag v0.1.0 && git push origin v0.1.0`
-3. CI builds/pushes images to Docker Hub and publishes the PyPI wheel (with embedded compose bundle)
+2. **Docker images:** GitHub → Actions → **Docker publish** → Run workflow (choose tag, e.g. `latest` or `0.1.0`)
+3. **PyPI wheel:** GitHub → Actions → **PyPI release** → Run workflow (enter version, e.g. `0.1.0`)
+
+Bump `pyproject.toml`, `package.json`, and `backend/VERSION` together before a release. The UI footer reads the version from the backend (`GET /system/version`).
 
 Default image namespace: `docker.io/lulu/lai-*` (override with `LAI_DOCKERHUB_USER` when building the bundle).

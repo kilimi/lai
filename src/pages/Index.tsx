@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useLocation, Link } from "react-router-dom";
 import { Plus, Search, Settings, Activity, Tag, Filter, Sparkles, RefreshCw, FolderOpen, ChevronRight, FolderPlus, Image as ImageIcon, Brain, BookOpen, Rocket, ArrowRight } from "lucide-react";
+import { LAI_TUTORIALS_URL } from "@/constants/externalLinks";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -64,15 +65,17 @@ function EmptyOnboarding() {
       icon: ImageIcon,
       title: "Add a dataset",
       description: "Upload images or a video, then label them with built-in tools.",
-      cta: "Learn how",
-      to: "/help/dataset-view",
+      cta: "Watch tutorials",
+      href: LAI_TUTORIALS_URL,
+      external: true,
     },
     {
       icon: Brain,
       title: "Train & evaluate a model",
       description: "Run YOLO, Mask-RCNN or RT-DETR — compare results side-by-side.",
-      cta: "Browse docs",
-      to: "/help",
+      cta: "Watch tutorials",
+      href: LAI_TUTORIALS_URL,
+      external: true,
     },
   ];
 
@@ -96,10 +99,15 @@ function EmptyOnboarding() {
               </Link>
             </Button>
             <Button asChild variant="outline" size="lg">
-              <Link to="/help" className="gap-2">
+              <a
+                href={LAI_TUTORIALS_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="gap-2 inline-flex items-center"
+              >
                 <BookOpen className="w-4 h-4" />
-                Open Help Center
-              </Link>
+                Tutorials
+              </a>
             </Button>
           </div>
         </div>
@@ -108,12 +116,10 @@ function EmptyOnboarding() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {steps.map((step, idx) => {
           const Icon = step.icon;
-          return (
-            <Link
-              key={step.title}
-              to={step.to}
-              className="group glass-card rounded-xl p-5 border border-border/50 hover:border-primary/40 transition-all hover:-translate-y-0.5"
-            >
+          const cardClass =
+            "group glass-card rounded-xl p-5 border border-border/50 hover:border-primary/40 transition-all hover:-translate-y-0.5";
+          const content = (
+            <>
               <div className="flex items-start gap-3 mb-3">
                 <div className={cn(
                   "h-10 w-10 rounded-lg flex items-center justify-center flex-shrink-0",
@@ -131,6 +137,24 @@ function EmptyOnboarding() {
                 {step.cta}
                 <ArrowRight className="h-3.5 w-3.5" />
               </span>
+            </>
+          );
+          if ("external" in step && step.external) {
+            return (
+              <a
+                key={step.title}
+                href={step.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={`${cardClass} block`}
+              >
+                {content}
+              </a>
+            );
+          }
+          return (
+            <Link key={step.title} to={step.to!} className={cardClass}>
+              {content}
             </Link>
           );
         })}

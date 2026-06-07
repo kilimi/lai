@@ -1,13 +1,14 @@
 import { Link, useLocation, useParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { Settings, Sparkles, Sun, Moon, Cpu, Loader2 } from "lucide-react";
+import { Settings, Sparkles, Sun, Moon, Cpu, Loader2, BookOpen } from "lucide-react";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { TasksPopover } from "./TasksPopover";
 import { useTheme } from "./ThemeProvider";
 import { useApi } from "@/hooks/use-api";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Progress } from "@/components/ui/progress";
+import { LAI_TUTORIALS_URL } from "@/constants/externalLinks";
 
 type GpuStatus = {
   has_gpu: boolean;
@@ -166,6 +167,39 @@ export function Navbar() {
             </PopoverContent>
           </Popover>
           
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 gap-1.5 px-2.5 text-xs font-medium hidden sm:inline-flex"
+            asChild
+          >
+            <a
+              href={LAI_TUTORIALS_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Tutorials and workflow guides"
+            >
+              <BookOpen className="h-3.5 w-3.5" />
+              Tutorials
+            </a>
+          </Button>
+
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-9 w-9 sm:hidden"
+            asChild
+          >
+            <a
+              href={LAI_TUTORIALS_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Tutorials"
+            >
+              <BookOpen className="h-4 w-4" />
+            </a>
+          </Button>
+
           <Button
             variant="outline"
             size="icon"

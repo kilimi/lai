@@ -1844,6 +1844,10 @@ export class ApiClient {
   }>> {
     return this.request('/system/gpu', { method: 'GET' });
   }
+
+  async getAppVersion(): Promise<ApiResponse<{ version: string }>> {
+    return this.request('/system/version', { method: 'GET' });
+  }
 }
 
 /**

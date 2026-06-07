@@ -54,12 +54,15 @@ FROM ${MMYOLO_IMAGE} AS mmyolo-stack
 # ---------- Stage 3: runtime ----------
 FROM python:3.10-slim AS runtime
 
+ARG LAI_VERSION=0.1.0
+
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     HOME=/app \
     PYTHONPATH=/opt/lai/lib/python3.10/site-packages \
     PATH=/opt/lai/bin:$PATH \
-    MMYOLO_PYTHON=/opt/conda/envs/mmyolo/bin/python
+    MMYOLO_PYTHON=/opt/conda/envs/mmyolo/bin/python \
+    LAI_VERSION=${LAI_VERSION}
 
 # OpenCV / PyTorch (conda) runtime libs on slim base
 RUN apt-get update && apt-get install -y --no-install-recommends \
