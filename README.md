@@ -7,7 +7,7 @@ Annotation and dataset stack. The **`lai`** CLI drives **Docker Compose** (Docke
 No git clone or local image builds. Full guide: [docs/INSTALL_USERS.md](docs/INSTALL_USERS.md).
 
 ```bash
-pip install lai          # or: pipx install lai
+pip install laivision    # or: pipx install laivision
 lai install-gui          # data folder, port, CPU vs GPU tier
 lai up                   # pulls Docker Hub images if needed, starts stack
 ```

@@ -3,6 +3,6 @@
 try:
     import importlib.metadata as _im
 
-    __version__ = _im.version("lai")
+    __version__ = _im.version("laivision")
 except Exception:
     __version__ = "0.1.0"

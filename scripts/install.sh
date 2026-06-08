@@ -173,7 +173,7 @@ fi
 echo ""
 echo "Developer: host backend code"
 echo "  When enabled, backend and Celery mount your repo’s backend/ over /app (see docker-compose.code-mount.yml)."
-echo "  Disable for pull-only installs (pip install lai + registry images)."
+echo "  Disable for pull-only installs (pip install laivision + registry images)."
 echo ""
 if [[ -z "$BIND_CODE" ]]; then
   if [[ "$IS_DEVELOPER" -eq 0 ]]; then

@@ -11,9 +11,9 @@ The **`lai`** command is a small CLI that drives **Docker Compose**. You need **
 ### From PyPI (recommended for end users)
 
 ```bash
-pipx install lai
+pipx install laivision
 # or, inside a venv:
-pip install lai
+pip install laivision
 ```
 
 The wheel includes compose files under `lai/bundle/`. Your settings are written to **`~/.config/lai/.env`** (not inside site-packages).
@@ -50,7 +50,7 @@ Do **not** run `pip install …` on the **system** Python. You will get **extern
 
 ### Conda
 
-Create an environment from the repo (uses PyPI when `lai` is published):
+Create an environment from the repo (uses PyPI when `laivision` is published):
 
 ```bash
 conda env create -f environment.yml
@@ -65,7 +65,7 @@ pip install -e .
 
 ### From PyPI (end users)
 
-Already covered above — use `pip install lai` then `lai install-gui`.
+Already covered above — use `pip install laivision` then `lai install-gui`.
 
 For editable installs from a git checkout, the repo root is used directly instead of the embedded bundle.
 
@@ -155,4 +155,4 @@ python -m build
 # upload the wheel/sdist with your usual tool (twine, etc.)
 ```
 
-If the PyPI name **`lai`** is taken, change **`name`** in `pyproject.toml` and update docs accordingly.
+PyPI package name: **`laivision`** (`pip install laivision`). The console command remains **`lai`**.

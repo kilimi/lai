@@ -346,7 +346,7 @@ def main(argv: list[str] | None = None) -> int:
         description="LAI stack via Docker Compose (needs Docker + Compose 2.24+). "
         "pip install only adds this CLI — run `lai install` once for guided setup, then `lai up`.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="Typical first run (pull-only):\n  pip install lai\n  lai install-gui\n  lai pull && lai up\n\nDevelopers (git clone):\n  pip install -e .\n  lai install-gui\n  lai up --build\n\nRemove data:  lai uninstall  (type DELETE to confirm)",
+        epilog="Typical first run (pull-only):\n  pip install laivision\n  lai install-gui\n  lai pull && lai up\n\nDevelopers (git clone):\n  pip install -e .\n  lai install-gui\n  lai up --build\n\nRemove data:  lai uninstall  (type DELETE to confirm)",
     )
     p.add_argument("--version", action="version", version=f"lai {lai.__version__}")
 

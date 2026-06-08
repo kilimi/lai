@@ -70,7 +70,7 @@ PAGE_FORM = Template("""<!DOCTYPE html>
     <p class="hint">Whether containers use Python from your disk (live edits) or only from pre-built registry images.</p>
     <div class="pt-mode">
       <label class="row"><input type="radio" name="bind_backend" value="1" id="bind_yes" $bind_yes_checked/> Mount host <code>backend/</code> — edit code without rebuilding (developers)</label>
-      <label class="row"><input type="radio" name="bind_backend" value="0" id="bind_no" $bind_no_checked/> Use registry images only — recommended for <code>pip install lai</code></label>
+      <label class="row"><input type="radio" name="bind_backend" value="0" id="bind_no" $bind_no_checked/> Use registry images only — recommended for <code>pip install laivision</code></label>
     </div>
     <div id="repo_root_wrap">
       <label for="repo_root">Repository root (absolute path, contains <code>backend/</code>)</label>

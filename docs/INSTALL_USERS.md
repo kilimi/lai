@@ -17,8 +17,8 @@ You do **not** need Node.js, the application source repo, or local image builds.
 ## Quick start
 
 ```bash
-pip install lai
-# or: pipx install lai
+pip install laivision
+# or: pipx install laivision
 
 lai install-gui          # data folder, web port, CPU vs GPU tier
 lai up                   # pulls Docker Hub images if needed, starts stack
@@ -76,7 +76,7 @@ lai restart sam_service
 ## Upgrade
 
 ```bash
-pip install -U lai
+pip install -U laivision
 lai upgrade
 ```
 
@@ -100,7 +100,7 @@ lai compose -- logs -f backend
 
 **Windows:** use Git Bash or WSL for `lai install` (terminal wizard). `lai install-gui` works in any browser.
 
-**Debian/Ubuntu:** do not `pip install` on system Python (PEP 668). Use `pipx install lai` or a venv.
+**Debian/Ubuntu:** do not `pip install` on system Python (PEP 668). Use `pipx install laivision` or a venv.
 
 ## Maintainer release (Docker Hub + PyPI)
 
