@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "LAI maintainers" }]
 license = "AGPL-3.0-only"
-license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_LICENSES.md", "licenses/*.txt"]
+license-files = ["LICENSE"]
 keywords = ["annotation", "docker", "segmentation", "dataset"]
 classifiers = [
   "Development Status :: 4 - Beta",
@@ -36,6 +36,9 @@ Issues = "https://github.com/lulu/lai/issues"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["lai*"]
+
+[tool.setuptools.exclude-package-data]
+lai = ["bin/*", "lib/*", "include/*", "share/*", "pyvenv.cfg"]
 
 [tool.setuptools.package-data]
 lai = ["bundle/**/*"]

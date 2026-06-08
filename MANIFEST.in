@@ -1,0 +1,6 @@
+# Never ship a local venv accidentally created inside the lai/ package directory.
+prune lai/bin
+prune lai/lib
+prune lai/include
+prune lai/share
+exclude lai/pyvenv.cfg

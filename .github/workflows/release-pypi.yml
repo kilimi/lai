@@ -28,23 +28,32 @@ jobs:
         id: ver
         run: echo "version=${{ inputs.release_version }}" >> "$GITHUB_OUTPUT"
 
+      - name: Sync pyproject.toml version with release input
+        run: |
+          ver="${{ steps.ver.outputs.version }}"
+          sed -i "s/^version = \".*\"/version = \"${ver}\"/" pyproject.toml
+          grep '^version = ' pyproject.toml
+
       - name: Build embedded compose bundle
         env:
           LAI_DOCKERHUB_USER: ${{ secrets.DOCKERHUB_USERNAME }}
         run: bash scripts/build_dist_bundle.sh "${{ steps.ver.outputs.version }}"
 
       - name: Install build tools
-        run: python -m pip install --upgrade pip build twine
+        run: python -m pip install --upgrade pip build "twine>=6.1" "packaging>=24.2"
 
       - name: Build wheel and sdist
         run: python -m build
+
+      - name: Validate distributions
+        run: twine check dist/lai-${{ inputs.release_version }}*
 
       - name: Publish to PyPI
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
         run: |
-          twine upload \
+          twine upload --verbose --non-interactive \
             "dist/lai-${{ inputs.release_version }}-py3-none-any.whl" \
             "dist/lai-${{ inputs.release_version }}.tar.gz"
 
