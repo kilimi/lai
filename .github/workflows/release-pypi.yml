@@ -29,10 +29,34 @@ jobs:
         run: echo "version=${{ inputs.release_version }}" >> "$GITHUB_OUTPUT"
 
       - name: Sync pyproject.toml version with release input
+        env:
+          RELEASE_VERSION: ${{ steps.ver.outputs.version }}
         run: |
-          ver="${{ steps.ver.outputs.version }}"
-          sed -i "s/^version = \".*\"/version = \"${ver}\"/" pyproject.toml
-          grep '^version = ' pyproject.toml
+          python - <<'PY'
+          import os
+          import re
+          import sys
+
+          ver = os.environ["RELEASE_VERSION"].strip()
+          if not re.fullmatch(r"\d+\.\d+\.\d+", ver):
+              sys.exit(
+                  f"release_version must look like 0.1.0 (digits and dots only); got {ver!r}"
+              )
+
+          path = "pyproject.toml"
+          text = open(path, encoding="utf-8").read()
+          new, n = re.subn(
+              r'^version = ".*"',
+              f'version = "{ver}"',
+              text,
+              count=1,
+              flags=re.M,
+          )
+          if n != 1:
+              sys.exit("Could not find project.version line in pyproject.toml")
+          open(path, "w", encoding="utf-8").write(new)
+          print(f'Synced pyproject.toml version to "{ver}"')
+          PY
 
       - name: Build embedded compose bundle
         env:
