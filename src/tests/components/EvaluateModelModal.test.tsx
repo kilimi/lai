@@ -4,17 +4,17 @@ import { useEffect } from 'react';
 import '@testing-library/jest-dom';
 import { EvaluateModelModal } from '@/components/EvaluateModelModal';
 
-// Mock useApi hook
-vi.mock('@/hooks/use-api', () => ({
-  useApi: () => ({
-    api: {
-      getAnnotationCollectionCounts: vi.fn().mockResolvedValue({ success: true, data: [] }),
-      getImageCollections: vi.fn().mockResolvedValue({
-        success: true,
-        data: [{ id: 'col1', name: 'Main', is_default: true }],
-      }),
-    },
+// Stable api ref — a fresh object each render retriggers enrichDataset's useEffect loop.
+const mockApi = {
+  getAnnotationCollectionCounts: vi.fn().mockResolvedValue({ success: true, data: [] }),
+  getImageCollections: vi.fn().mockResolvedValue({
+    success: true,
+    data: [{ id: 'col1', name: 'Main', is_default: true }],
   }),
+};
+
+vi.mock('@/hooks/use-api', () => ({
+  useApi: () => ({ api: mockApi }),
 }));
 
 // Mock DatasetEvalPicker

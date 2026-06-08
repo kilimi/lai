@@ -24,4 +24,4 @@ jobs:
         env:
           CI: true
           NODE_OPTIONS: --max-old-space-size=4096
-        run: npm run test -- --maxWorkers=1 --pool=forks --no-file-parallelism
+        run: npm run tests -- --maxWorkers=1 --pool=forks --no-file-parallelism
