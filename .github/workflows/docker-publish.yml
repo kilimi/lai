@@ -115,6 +115,8 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          build-contexts: |
+            docker_deps=./dockers/backend
           build-args: |
             MMYOLO_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/lai-mmyolo:${{ needs.prepare.outputs.docker_tag }}
             LAI_VERSION=${{ needs.prepare.outputs.app_version }}
