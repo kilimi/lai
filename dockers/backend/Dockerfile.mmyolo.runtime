@@ -1,6 +1,6 @@
 # MMYOLO GPU runtime (artifact image; merged into lai-celery and copied into lai-backend).
-# No download.openmmlab.com — mim install mmcv uses that CDN and fails when OpenMMLab is down.
-# Sources: PyPI (mmengine, mmdet), GitHub (mmcv source, mmyolo), optional wheels/ offline.
+# mmcv: OpenMMLab prebuilt wheel (fast); GitHub source build when CDN is down; optional wheels/ offline.
+# Sources: PyPI (mmengine, mmdet), OpenMMLab (mmcv wheel), GitHub (mmcv source, mmyolo).
 
 FROM nvidia/cuda:11.3.1-devel-ubuntu20.04
 
@@ -32,6 +32,7 @@ RUN wget -q https://repo.anaconda.com/miniconda/Miniconda3-py39_24.1.2-0-Linux-x
 
 ARG MMCV_VERSION=2.0.1
 ARG MMCV_BUILD_JOBS=2
+ARG MMCV_WHEEL_INDEX=https://download.openmmlab.com/mmcv/dist/cu113/torch1.10.0/index.html
 COPY wheels /wheels
 
 RUN conda create -n mmyolo python=3.8 -y
@@ -53,8 +54,12 @@ RUN if ls /wheels/mmengine-*.whl >/dev/null 2>&1; then \
 RUN if ls /wheels/mmcv-*.whl >/dev/null 2>&1; then \
         echo "Installing mmcv from wheels/ (offline)"; \
         PYTHONPATH= ${MMYOLO_ENV}/bin/pip install --no-cache-dir /wheels/mmcv-*.whl; \
+    elif wget -q --spider "${MMCV_WHEEL_INDEX}" 2>/dev/null; then \
+        echo "Installing mmcv v${MMCV_VERSION} from OpenMMLab prebuilt wheel"; \
+        PYTHONPATH= ${MMYOLO_ENV}/bin/pip install --no-cache-dir "mmcv==${MMCV_VERSION}" \
+            -f "${MMCV_WHEEL_INDEX}"; \
     else \
-        echo "Building mmcv v${MMCV_VERSION} from GitHub (no OpenMMLab CDN; 20-60+ min)"; \
+        echo "OpenMMLab CDN unavailable — building mmcv v${MMCV_VERSION} from GitHub (20-60+ min)"; \
         git clone --depth 1 --branch "v${MMCV_VERSION}" https://github.com/open-mmlab/mmcv.git /tmp/mmcv \
         && MAX_JOBS=${MMCV_BUILD_JOBS} PYTHONPATH= ${MMYOLO_ENV}/bin/pip install --no-cache-dir \
             --no-build-isolation -v /tmp/mmcv \
