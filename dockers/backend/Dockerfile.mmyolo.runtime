@@ -1,6 +1,6 @@
 # MMYOLO GPU runtime (artifact image; merged into lai-celery and copied into lai-backend).
-# mmcv: OpenMMLab prebuilt wheel (fast); GitHub source build when CDN is down; optional wheels/ offline.
-# Sources: PyPI (mmengine, mmdet), OpenMMLab (mmcv wheel), GitHub (mmcv source, mmyolo).
+# mmcv: source build by default (GPU-compatible via TORCH_CUDA_ARCH_LIST+PTX); optional prebuilt/offline wheels.
+# Sources: PyPI (mmengine, mmdet), OpenMMLab (mmcv prebuilt), GitHub (mmcv source, mmyolo).
 
 FROM nvidia/cuda:11.3.1-devel-ubuntu20.04
 
@@ -32,8 +32,11 @@ RUN wget -q https://repo.anaconda.com/miniconda/Miniconda3-py39_24.1.2-0-Linux-x
 
 ARG MMCV_VERSION=2.0.1
 ARG MMCV_BUILD_JOBS=2
+# Prebuilt OpenMMLab wheels only ship sm_60–sm_86 kernels; RTX 40xx+ need a source build (+PTX).
+ARG MMCV_USE_PREBUILT=0
 ARG MMCV_WHEEL_INDEX=https://download.openmmlab.com/mmcv/dist/cu113/torch1.10.0/index.html
-COPY wheels /wheels
+# Optional offline wheels in dockers/backend/wheels/ (.gitkeep keeps COPY valid when empty).
+COPY wheels/ /wheels/
 
 RUN conda create -n mmyolo python=3.8 -y
 
@@ -54,12 +57,12 @@ RUN if ls /wheels/mmengine-*.whl >/dev/null 2>&1; then \
 RUN if ls /wheels/mmcv-*.whl >/dev/null 2>&1; then \
         echo "Installing mmcv from wheels/ (offline)"; \
         PYTHONPATH= ${MMYOLO_ENV}/bin/pip install --no-cache-dir /wheels/mmcv-*.whl; \
-    elif wget -q --spider "${MMCV_WHEEL_INDEX}" 2>/dev/null; then \
-        echo "Installing mmcv v${MMCV_VERSION} from OpenMMLab prebuilt wheel"; \
+    elif [ "${MMCV_USE_PREBUILT}" = "1" ] && wget -q --spider "${MMCV_WHEEL_INDEX}" 2>/dev/null; then \
+        echo "Installing mmcv v${MMCV_VERSION} from OpenMMLab prebuilt wheel (sm_60–sm_86 only)"; \
         PYTHONPATH= ${MMYOLO_ENV}/bin/pip install --no-cache-dir "mmcv==${MMCV_VERSION}" \
             -f "${MMCV_WHEEL_INDEX}"; \
     else \
-        echo "OpenMMLab CDN unavailable — building mmcv v${MMCV_VERSION} from GitHub (20-60+ min)"; \
+        echo "Building mmcv v${MMCV_VERSION} from GitHub for GPU arch ${TORCH_CUDA_ARCH_LIST} (20-60+ min)"; \
         git clone --depth 1 --branch "v${MMCV_VERSION}" https://github.com/open-mmlab/mmcv.git /tmp/mmcv \
         && MAX_JOBS=${MMCV_BUILD_JOBS} PYTHONPATH= ${MMYOLO_ENV}/bin/pip install --no-cache-dir \
             --no-build-isolation -v /tmp/mmcv \

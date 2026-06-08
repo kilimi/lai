@@ -77,6 +77,7 @@ jobs:
           images: ${{ secrets.DOCKERHUB_USERNAME }}/lai-mmyolo
           tags: |
             type=raw,value=${{ needs.prepare.outputs.docker_tag }}
+      - run: mkdir -p dockers/backend/wheels
       - uses: docker/build-push-action@v6
         with:
           context: ./dockers/backend
@@ -86,6 +87,8 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          build-args: |
+            MMCV_BUILD_JOBS=4
 
   publish-backend:
     needs: [prepare, publish-mmyolo]
