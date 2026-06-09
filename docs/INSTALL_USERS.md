@@ -110,4 +110,13 @@ lai compose -- logs -f backend
 
 Bump `pyproject.toml`, `package.json`, and `backend/VERSION` together before a release. The UI footer reads the version from the backend (`GET /system/version`).
 
-Default image namespace: `docker.io/lulu/lai-*` (override with `LAI_DOCKERHUB_USER` when building the bundle).
+Default image namespace: `docker.io/luluray/lai-*` (set GitHub secret `DOCKERHUB_USERNAME` when publishing PyPI + Docker workflows).
+
+If `lai up` tries to pull `lulu/lai-*`, your `~/.config/lai/.env` was written with the wrong namespace. Fix:
+
+```bash
+# Option 1: re-run setup (rewrites image tags)
+LAI_DOCKERHUB_USER=luluray lai install-gui
+
+# Option 2: edit ~/.config/lai/.env — replace lulu/ with luluray/ in all LAI_*_IMAGE lines
+```

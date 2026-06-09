@@ -7,12 +7,38 @@ import pytest
 
 from lai.compose_build import uses_local_build
 from lai.registry import (
+    _embedded_registry_org,
+    _org_from_image_ref,
     default_bundle_url,
     gpu_tier_enabled,
     is_developer_checkout,
     registry_image_tag,
     registry_image_tags,
+    registry_org,
 )
+
+
+def test_org_from_image_ref():
+    assert _org_from_image_ref("docker.io/luluray/lai-backend:0.1.0") == "luluray"
+    assert _org_from_image_ref("luluray/lai-backend:0.1.0") == "luluray"
+
+
+def test_registry_org_defaults_to_luluray(monkeypatch):
+    monkeypatch.delenv("LAI_DOCKERHUB_USER", raising=False)
+    monkeypatch.delenv("LAI_GHCR_ORG", raising=False)
+    monkeypatch.setattr("lai.registry._embedded_registry_org", lambda: None)
+    assert registry_org() == "luluray"
+
+
+def test_embedded_registry_org_from_bundle_example(tmp_path, monkeypatch):
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    (bundle / ".env.example").write_text(
+        "LAI_BACKEND_IMAGE=docker.io/luluray/lai-backend:0.1.0\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("lai.paths.embedded_bundle_dir", lambda: bundle)
+    assert _embedded_registry_org() == "luluray"
 
 
 def test_registry_image_tag_format_dockerhub(monkeypatch):

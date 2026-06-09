@@ -6,8 +6,8 @@ from pathlib import Path
 
 from lai import __version__
 
-# Defaults when env vars are unset (overridden at runtime via LAI_DOCKERHUB_USER / LAI_REGISTRY).
-DEFAULT_DOCKERHUB_USER = "lulu"
+# Default Docker Hub namespace when nothing else is configured (see registry_org()).
+DEFAULT_DOCKERHUB_USER = "luluray"
 GITHUB_REPO = os.environ.get("LAI_GITHUB_REPO", "lulu/lai")
 
 IMAGE_ENV_KEYS: tuple[str, ...] = (
@@ -51,11 +51,52 @@ def _registry_host() -> str:
     return os.environ.get("LAI_REGISTRY", "docker.io").strip().rstrip("/")
 
 
+def _org_from_image_ref(image_ref: str) -> str | None:
+    """Extract registry namespace from ``docker.io/org/lai-backend:tag``."""
+    ref = image_ref.strip().strip('"').strip("'")
+    if not ref:
+        return None
+    if ref.startswith("docker.io/"):
+        ref = ref[len("docker.io/") :]
+    parts = ref.split("/")
+    if len(parts) >= 2 and parts[0]:
+        return parts[0]
+    return None
+
+
+def _embedded_registry_org() -> str | None:
+    """Docker Hub org baked into the PyPI wheel at publish time (``lai/bundle/.env.example``)."""
+    from lai.paths import embedded_bundle_dir
+
+    example = embedded_bundle_dir() / ".env.example"
+    if not example.is_file():
+        return None
+    try:
+        text = example.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("LAI_BACKEND_IMAGE="):
+            return _org_from_image_ref(line.split("=", 1)[1])
+    return None
+
+
 def registry_org() -> str:
     """Registry namespace / org for image tags."""
     if _registry_host() == "ghcr.io":
-        return os.environ.get("LAI_GHCR_ORG", DEFAULT_DOCKERHUB_USER)
-    return os.environ.get("LAI_DOCKERHUB_USER", DEFAULT_DOCKERHUB_USER)
+        return (
+            os.environ.get("LAI_GHCR_ORG", "").strip()
+            or _embedded_registry_org()
+            or DEFAULT_DOCKERHUB_USER
+        )
+    explicit = os.environ.get("LAI_DOCKERHUB_USER", "").strip()
+    if explicit:
+        return explicit
+    embedded = _embedded_registry_org()
+    if embedded:
+        return embedded
+    return DEFAULT_DOCKERHUB_USER
 
 
 def registry_prefix() -> str:
@@ -115,9 +156,12 @@ def write_registry_env(
 
     env_file.parent.mkdir(parents=True, exist_ok=True)
     ver = version or release_version()
+    org = registry_org()
     tags = registry_image_tags(ver)
     for key, tag in tags.items():
         _upsert_env_line(env_file, key, tag)
+    if _registry_host() == "docker.io":
+        _upsert_env_line(env_file, "LAI_DOCKERHUB_USER", org)
     _upsert_env_line(env_file, "LAI_RELEASE_VERSION", ver.lstrip("v"))
     _upsert_env_line(env_file, "LAI_GPU_TIER", "1" if gpu_tier else "0")
     if gpu_tier:

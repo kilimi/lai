@@ -13,7 +13,7 @@ STAGE="${BUNDLE_DIR}/lai-dist-${VERSION}"
 EMBED="${ROOT}/lai/bundle"
 
 REGISTRY="${LAI_REGISTRY:-docker.io}"
-ORG="${LAI_DOCKERHUB_USER:-${LAI_GHCR_ORG:-lulu}}"
+ORG="${LAI_DOCKERHUB_USER:-${LAI_GHCR_ORG:-luluray}}"
 if [[ "$REGISTRY" == "docker.io" ]]; then
   IMAGE_PREFIX="docker.io/${ORG}"
 else
