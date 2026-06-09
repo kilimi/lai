@@ -41,6 +41,9 @@ class Project(Base):
 
 class Dataset(Base):
     __tablename__ = "datasets"
+    __table_args__ = (
+        Index("ix_datasets_project_id", "project_id"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, index=True)
@@ -115,6 +118,7 @@ class Image(Base):
         Index('idx_image_dataset_groupid', 'dataset_id', 'group_id'),
         # Supports _set_random_image_as_logo: filtered scan on dataset + url
         Index('idx_image_dataset_url', 'dataset_id', 'url'),
+        Index('idx_images_dataset_id_id', 'dataset_id', 'id'),
     )
 
     id = Column(Integer, primary_key=True, index=True)
@@ -137,6 +141,11 @@ class Image(Base):
 
 class ImageCollection(Base):
     __tablename__ = "image_collections"
+    __table_args__ = (
+        Index("idx_image_collections_dataset_position", "dataset_id", "position"),
+        Index("idx_image_collections_dataset_default", "dataset_id", "is_default"),
+        Index("idx_image_collections_dataset_name", "dataset_id", "name"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     dataset_id = Column(Integer, ForeignKey("datasets.id"), index=True)
@@ -194,6 +203,8 @@ class Task(Base):
         Index('idx_task_project_status_created', 'project_id', 'status', 'created_at'),
         # Composite index for task type queries
         Index('idx_task_project_type_created', 'project_id', 'task_type', 'created_at'),
+        # Watchdog / navbar: active or recent tasks by status + created_at without project filter
+        Index('idx_tasks_status_created', 'status', 'created_at'),
     )
 
     id = Column(Integer, primary_key=True, index=True)
@@ -228,6 +239,10 @@ class WorkerGpuStatus(Base):
 
 class AnnotationFile(Base):
     __tablename__ = "annotation_files"
+    __table_args__ = (
+        Index("idx_annotation_files_dataset_created", "dataset_id", "created_at"),
+        Index("idx_annotation_files_dataset_status", "dataset_id", "processing_status"),
+    )
 
     id = Column(String, primary_key=True, index=True)  # Use string ID to match frontend
     dataset_id = Column(Integer, ForeignKey("datasets.id"), index=True)

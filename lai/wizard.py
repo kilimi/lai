@@ -112,13 +112,10 @@ PAGE_FORM = Template("""<!DOCTYPE html>
       <input type="text" id="depth_custom" name="depth_custom" value="$depth_custom" placeholder="all, minimal, or comma-separated .onnx filenames" autocomplete="off"/>
     </div>
 
-    <label for="sam3d">SAM 3 weights folder (absolute path)</label>
-    <input type="text" id="sam3d" name="sam3_dir" value="$sam3_dir" required autocomplete="off"/>
-    <p class="hint">Default is <code>…/backend/sam_service/models</code> in this repo. Put your checkpoint there (or anywhere you choose).</p>
-
-    <label for="sam3f">SAM 3 checkpoint file name</label>
-    <input type="text" id="sam3f" name="sam3_file" value="$sam3_file" required autocomplete="off"/>
-    <p class="hint">Usually <code>sam3.pt</code>. Restart <code>sam_service</code> after adding the file. SAM 2 works without SAM 3.</p>
+    <label for="sam3cp">SAM 3 checkpoint file (absolute path)</label>
+    <input type="text" id="sam3cp" name="sam3_checkpoint" value="$sam3_checkpoint"
+      placeholder="/path_to_sam3_checkpoint" required autocomplete="off"/>
+    <p class="hint">$sam3_hint</p>
 
     <button type="submit" $submit_disabled>Save and finish</button>
   </form>
@@ -175,6 +172,40 @@ PAGE_OK = Template("""<!DOCTYPE html>
 </body>
 </html>
 """)
+
+
+SAM3_CHECKPOINT_PLACEHOLDER = "/path_to_sam3_checkpoint"
+
+
+def _default_sam3_checkpoint(bundle_root: Path, *, dev_checkout: bool) -> str:
+    if dev_checkout:
+        return str((bundle_root / "backend" / "sam_service" / "models" / "sam3.pt").resolve())
+    return str((Path.home() / "lai-data" / "sam3-models" / "sam3.pt").resolve())
+
+
+def _sam3_hint(*, dev_checkout: bool) -> str:
+    if dev_checkout:
+        return (
+            "Absolute path to your <code>sam3.pt</code> file. Default is under "
+            "<code>backend/sam_service/models/</code> in this repo. SAM 2 works without SAM 3."
+        )
+    return (
+        "Download SAM 3 weights (e.g. from "
+        '<a href="https://huggingface.co/facebook/sam3" target="_blank" rel="noopener noreferrer">'
+        "Hugging Face</a>) and set the full path to the <code>.pt</code> file. "
+        "Default <code>~/lai-data/sam3-models/sam3.pt</code> — parent folder is created on save. "
+        "SAM 2 works without SAM 3."
+    )
+
+
+def _parse_sam3_checkpoint(path_str: str) -> tuple[str, str]:
+    """Split a checkpoint path into host folder + filename for compose env vars."""
+    p = Path(path_str).expanduser()
+    if p.suffix:
+        resolved = p.resolve()
+        return str(resolved.parent), resolved.name
+    resolved = p.resolve()
+    return str(resolved), "sam3.pt"
 
 
 def _upsert_env_line(env_path: Path, key: str, value: str) -> None:
@@ -319,13 +350,13 @@ def run_wizard(bundle_root: Path, *, open_browser: bool = True) -> int:
 
     default_data = str(Path.home() / "lai-data")
     default_web = "8089"
-    default_sam3_dir = str((bundle_root / "backend" / "sam_service" / "models").resolve())
-    default_sam3_file = "sam3.pt"
     default_repo_root = str(bundle_root.resolve())
     wizard_port = _pick_port()
     from lai.registry import is_developer_checkout
 
     dev_checkout = is_developer_checkout(bundle_root)
+    default_sam3_checkpoint = _default_sam3_checkpoint(bundle_root, dev_checkout=dev_checkout)
+    sam3_hint = _sam3_hint(dev_checkout=dev_checkout)
     bind_yes_checked = "checked" if dev_checkout else ""
     bind_no_checked = "" if dev_checkout else "checked"
     gpu_tier_checked = "checked"
@@ -348,8 +379,8 @@ def run_wizard(bundle_root: Path, *, open_browser: bool = True) -> int:
                     repo_root=_html_escape(default_repo_root),
                     depth_options=_depth_select_options("all"),
                     depth_custom="",
-                    sam3_dir=_html_escape(default_sam3_dir),
-                    sam3_file=_html_escape(default_sam3_file),
+                    sam3_checkpoint=_html_escape(default_sam3_checkpoint),
+                    sam3_hint=sam3_hint,
                     submit_disabled=submit_dis,
                     bind_yes_checked=bind_yes_checked,
                     bind_no_checked=bind_no_checked,
@@ -382,8 +413,7 @@ def run_wizard(bundle_root: Path, *, open_browser: bool = True) -> int:
                 data = urllib.parse.parse_qs(raw, keep_blank_values=True)
                 data_dir = (data.get("data_dir") or [""])[0].strip()
                 web_port = (data.get("web_port") or [""])[0].strip()
-                sam3_dir = (data.get("sam3_dir") or [""])[0].strip()
-                sam3_file = (data.get("sam3_file") or [""])[0].strip()
+                sam3_checkpoint = (data.get("sam3_checkpoint") or [""])[0].strip()
                 lai_pt = _resolve_pretrained_from_form(data)
                 lai_depth = _resolve_env_preset(
                     (data.get("depth_preset") or ["all"])[0],
@@ -393,9 +423,17 @@ def run_wizard(bundle_root: Path, *, open_browser: bool = True) -> int:
                 bind_host_backend = bind_raw not in ("0", "false", "False", "no", "NO")
                 gpu_tier = bool((data.get("gpu_tier") or [""])[0].strip())
                 repo_in = (data.get("repo_root") or [""])[0].strip()
-                if not data_dir or not web_port or not sam3_dir or not sam3_file:
+                if not data_dir or not web_port or not sam3_checkpoint:
                     self.send_response(400)
                     self.end_headers()
+                    return
+                if sam3_checkpoint == SAM3_CHECKPOINT_PLACEHOLDER:
+                    self.send_response(400)
+                    self.end_headers()
+                    self.wfile.write(
+                        b"Set the full absolute path to your SAM 3 checkpoint file "
+                        b"(not the placeholder /path_to_sam3_checkpoint)."
+                    )
                     return
                 p = Path(data_dir).expanduser()
                 if not p.is_absolute():
@@ -403,12 +441,13 @@ def run_wizard(bundle_root: Path, *, open_browser: bool = True) -> int:
                     self.end_headers()
                     self.wfile.write(b"Data folder must be an absolute path.")
                     return
-                s3 = Path(sam3_dir).expanduser()
+                s3 = Path(sam3_checkpoint).expanduser()
                 if not s3.is_absolute():
                     self.send_response(400)
                     self.end_headers()
-                    self.wfile.write(b"SAM 3 folder must be an absolute path.")
+                    self.wfile.write(b"SAM 3 checkpoint must be an absolute path.")
                     return
+                sam3_dir, sam3_file = _parse_sam3_checkpoint(sam3_checkpoint)
                 try:
                     pi = int(web_port)
                     if not (1 <= pi <= 65535):
@@ -443,7 +482,7 @@ def run_wizard(bundle_root: Path, *, open_browser: bool = True) -> int:
                         str(p),
                         web_port,
                         "http://localhost:9999",
-                        str(s3),
+                        sam3_dir,
                         sam3_file,
                         lai_pretrained_models=lai_pt,
                         lai_depth_models=lai_depth,
