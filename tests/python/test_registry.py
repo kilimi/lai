@@ -10,11 +10,14 @@ from lai.registry import (
     _embedded_registry_org,
     _org_from_image_ref,
     default_bundle_url,
+    fetch_dockerhub_latest_tag,
     gpu_tier_enabled,
     is_developer_checkout,
     registry_image_tag,
     registry_image_tags,
     registry_org,
+    resolve_release_version,
+    write_registry_env,
 )
 
 
@@ -91,6 +94,97 @@ def test_gpu_tier_enabled_from_env():
     assert gpu_tier_enabled({"LAI_GPU_TIER": "1"}) is True
     assert gpu_tier_enabled({"COMPOSE_PROFILES": "gpu"}) is True
     assert gpu_tier_enabled({"LAI_GPU_TIER": "0"}) is False
+
+
+def test_fetch_dockerhub_latest_tag_picks_highest_semver(monkeypatch):
+    pages = [
+        {
+            "results": [
+                {"name": "0.1.0"},
+                {"name": "0.2.0"},
+                {"name": "latest"},
+            ],
+            "next": None,
+        }
+    ]
+
+    def fake_urlopen(req, timeout=15.0):
+        import json as _json
+        from io import BytesIO
+
+        class Resp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return _json.dumps(pages.pop(0)).encode("utf-8")
+
+        return Resp()
+
+    monkeypatch.setattr("lai.registry.urllib.request.urlopen", fake_urlopen)
+    assert fetch_dockerhub_latest_tag("luluray") == "0.2.0"
+
+
+def test_fetch_dockerhub_latest_tag_falls_back_to_latest(monkeypatch):
+    def fake_urlopen(req, timeout=15.0):
+        import json as _json
+        from io import BytesIO
+
+        class Resp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return _json.dumps(
+                    {"results": [{"name": "latest"}], "next": None}
+                ).encode("utf-8")
+
+        return Resp()
+
+    monkeypatch.setattr("lai.registry.urllib.request.urlopen", fake_urlopen)
+    assert fetch_dockerhub_latest_tag("luluray") == "latest"
+
+
+def test_resolve_release_version_uses_dockerhub_when_auto(monkeypatch):
+    monkeypatch.setattr("lai.registry.fetch_dockerhub_latest_tag", lambda org: "9.9.9")
+    monkeypatch.setattr("lai.registry.registry_org", lambda: "luluray")
+    assert resolve_release_version({"LAI_RELEASE_VERSION": "0.1.0"}) == "9.9.9"
+
+
+def test_resolve_release_version_respects_pin(monkeypatch):
+    monkeypatch.setattr("lai.registry.fetch_dockerhub_latest_tag", lambda org: "9.9.9")
+    assert (
+        resolve_release_version(
+            {"LAI_PIN_DOCKER_VERSION": "1", "LAI_RELEASE_VERSION": "0.1.0"}
+        )
+        == "0.1.0"
+    )
+
+
+def test_resolve_release_version_skips_hub_when_auto_disabled(monkeypatch):
+    monkeypatch.setattr("lai.registry.fetch_dockerhub_latest_tag", lambda org: "9.9.9")
+    assert (
+        resolve_release_version(
+            {"LAI_AUTO_DOCKER_LATEST": "0", "LAI_RELEASE_VERSION": "0.1.0"}
+        )
+        == "0.1.0"
+    )
+
+
+def test_write_registry_env_uses_hub_version(tmp_path: Path, monkeypatch):
+    env_file = tmp_path / ".env"
+    monkeypatch.setattr("lai.registry.fetch_dockerhub_latest_tag", lambda org: "2.0.0")
+    monkeypatch.setattr("lai.registry.registry_org", lambda: "luluray")
+    write_registry_env(env_file, gpu_tier=False)
+    text = env_file.read_text(encoding="utf-8")
+    assert "LAI_RELEASE_VERSION=2.0.0" in text
+    assert "docker.io/luluray/lai-backend:2.0.0" in text
 
 
 def test_is_developer_checkout_with_repo_root(tmp_path: Path, monkeypatch):

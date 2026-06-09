@@ -1,7 +1,12 @@
 """Registry image tags and install-mode helpers for pull-only distribution."""
 from __future__ import annotations
 
+import json
 import os
+import re
+import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 from lai import __version__
@@ -115,8 +120,145 @@ def is_developer_checkout(bundle_root: Path) -> bool:
     return root is not None and root.resolve() == bundle_root.resolve()
 
 
+_CANONICAL_HUB_REPO = "lai-backend"
+_SEMVER_TAG = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
+
+
+def _env_bool(val: str | None, *, default: bool) -> bool:
+    if val is None or not str(val).strip():
+        return default
+    return str(val).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _auto_docker_latest_enabled(env: dict[str, str]) -> bool:
+    if "LAI_AUTO_DOCKER_LATEST" in env:
+        return _env_bool(env.get("LAI_AUTO_DOCKER_LATEST"), default=True)
+    if "LAI_AUTO_DOCKER_LATEST" in os.environ:
+        return _env_bool(os.environ.get("LAI_AUTO_DOCKER_LATEST"), default=True)
+    return True
+
+
+def _parse_env_file(path: Path) -> dict[str, str]:
+    out: dict[str, str] = {}
+    if not path.is_file():
+        return out
+    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        s = line.strip()
+        if not s or s.startswith("#") or "=" not in s:
+            continue
+        key, _, val = s.partition("=")
+        out[key.strip()] = val.strip().strip('"').strip("'")
+    return out
+
+
+def fetch_dockerhub_latest_tag(
+    org: str,
+    repo: str = _CANONICAL_HUB_REPO,
+    *,
+    timeout: float = 15.0,
+) -> str | None:
+    """
+    Highest PEP-440-style x.y.z tag on Docker Hub for ``org/repo``.
+
+    Falls back to the ``latest`` tag when no semver tags exist. Returns None if
+    the registry cannot be reached or the repository is missing.
+    """
+    if _registry_host() != "docker.io":
+        return None
+    org = (org or "").strip()
+    if not org:
+        return None
+
+    best_ver: tuple[int, int, int] | None = None
+    best_name: str | None = None
+    saw_latest = False
+    url: str | None = (
+        f"https://hub.docker.com/v2/repositories/{org}/{repo}/tags?page_size=100"
+    )
+    headers = {"Accept": "application/json"}
+
+    try:
+        while url:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            for item in data.get("results") or []:
+                name = str(item.get("name") or "")
+                if name == "latest":
+                    saw_latest = True
+                    continue
+                m = _SEMVER_TAG.fullmatch(name)
+                if not m:
+                    continue
+                key = (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+                if best_ver is None or key > best_ver:
+                    best_ver = key
+                    best_name = name.lstrip("v")
+            url = data.get("next")
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError, OSError):
+        return None
+
+    if best_name:
+        return best_name
+    if saw_latest:
+        return "latest"
+    return None
+
+
+def resolve_release_version(env: dict[str, str] | None = None) -> str:
+    """
+    Docker image tag to pull.
+
+    Order: pinned ``LAI_RELEASE_VERSION`` → Docker Hub newest x.y.z (or ``latest``)
+    → ``LAI_RELEASE_VERSION`` / PyPI package version.
+    """
+    env = env or {}
+    pinned = _env_bool(env.get("LAI_PIN_DOCKER_VERSION"), default=False) or _env_bool(
+        os.environ.get("LAI_PIN_DOCKER_VERSION"), default=False
+    )
+    if pinned:
+        ver = (env.get("LAI_RELEASE_VERSION") or os.environ.get("LAI_RELEASE_VERSION", "")).strip()
+        if ver:
+            return ver.lstrip("v")
+
+    if _auto_docker_latest_enabled(env):
+        remote = fetch_dockerhub_latest_tag(registry_org())
+        if remote:
+            return remote.lstrip("v")
+
+    ver = (env.get("LAI_RELEASE_VERSION") or os.environ.get("LAI_RELEASE_VERSION", "")).strip()
+    if ver:
+        return ver.lstrip("v")
+    return (__version__ or "0.0.0").lstrip("v")
+
+
 def release_version() -> str:
-    return os.environ.get("LAI_RELEASE_VERSION", __version__).strip() or __version__
+    """Backward-compatible alias for :func:`resolve_release_version`."""
+    return resolve_release_version()
+
+
+def refresh_registry_tags(bundle_root: Path) -> str | None:
+    """Refresh ``LAI_*_IMAGE`` tags in the user ``.env`` from Docker Hub (pull-only)."""
+    from lai.compose_build import uses_local_build
+    from lai.paths import resolve_env_file
+
+    if uses_local_build(bundle_root) or is_developer_checkout(bundle_root):
+        return None
+
+    env_file = resolve_env_file(bundle_root)
+    env = _parse_env_file(env_file)
+    ver = resolve_release_version(env)
+    old = (env.get("LAI_RELEASE_VERSION") or "").lstrip("v")
+    if ver != old:
+        print(f"Docker Hub image tag: {ver}" + (f" (was {old})" if old else ""), file=sys.stderr)
+
+    write_registry_env(
+        env_file,
+        version=ver,
+        gpu_tier=gpu_tier_enabled(env) if env else True,
+        bind_code=False,
+    )
+    return ver
 
 
 def registry_image_tag(key: str, version: str | None = None) -> str:
@@ -155,7 +297,11 @@ def write_registry_env(
     from lai.wizard import _upsert_env_line
 
     env_file.parent.mkdir(parents=True, exist_ok=True)
-    ver = version or release_version()
+    existing = _parse_env_file(env_file)
+    if version is not None:
+        ver = version.lstrip("v")
+    else:
+        ver = resolve_release_version(existing)
     org = registry_org()
     tags = registry_image_tags(ver)
     for key, tag in tags.items():

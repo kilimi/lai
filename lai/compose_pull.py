@@ -42,6 +42,10 @@ def pull_stack(root: Path, *, services: list[str] | None = None) -> int:
         print("Local build tags in .env — skipping registry pull.", flush=True)
         return 0
 
+    from lai.registry import refresh_registry_tags
+
+    refresh_registry_tags(root)
+
     cmd = _compose_base_cmd(root)
     for profile in compose_profiles(root):
         cmd.extend(["--profile", profile])
