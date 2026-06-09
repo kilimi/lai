@@ -89,6 +89,10 @@ def mmyolo_cfg_options_list(*, batch_size: int, epochs: int) -> List[str]:
     ]
 
 
+def _is_rotated_arch(arch: str) -> bool:
+    return (arch or "").strip() == "rtmdet-r"
+
+
 def build_model_override(
     num_classes: int,
     *,
@@ -158,6 +162,7 @@ class MMYOLOConfigParams:
     val_images_abs: str
     is_dji_mode: bool
     dji_use_widen_factor_025: bool
+    arch: str = "rtmdet"
 
 
 def resolve_mmyolo_split_paths(dataset_info: dict, dataset_dir: Path) -> tuple[str, str, str, str]:
@@ -212,30 +217,42 @@ def build_mmyolo_load_from_line(
     )
 
 
-def build_mmyolo_config_content(params: MMYOLOConfigParams) -> str:
-    """Generate the full mmyolo_config.py file content."""
-    model_override = build_model_override(
-        params.num_classes,
-        is_dji_mode=params.is_dji_mode,
-        dji_use_widen_factor_025=params.dji_use_widen_factor_025,
-    )
-    image_size = params.image_size
-    val_interval = max(1, min(10, max(1, params.epochs // 3)))
-    load_from_line = build_mmyolo_load_from_line(
-        params.base_cfg,
-        is_dji_mode=params.is_dji_mode,
-        dji_use_widen_factor_025=params.dji_use_widen_factor_025,
-    )
+def _build_custom_imports_line(*, is_rotated: bool) -> str:
+    imports = ["mmdet.evaluation.metrics.coco_metric"]
+    if is_rotated:
+        imports.append("mmrotate")
+    return f"custom_imports = dict(imports={imports!r}, allow_failed_imports=False)"
 
-    return f"""_base_ = ['{params.base_cfg}']
 
-# Ultralytics loads *.pt pretrained weights by default; MMYOLO base runtime uses load_from=None.
-{load_from_line}
-
-# Ensure evaluator registry entries from MMDetection are loaded.
-custom_imports = dict(imports=['mmdet.evaluation.metrics.coco_metric'], allow_failed_imports=False)
-
-# Simple pipelines without Mosaic/Albu — the base YOLOv8 config uses albumentations in
+def _build_pipeline_block(*, image_size: int, is_rotated: bool) -> str:
+    if is_rotated:
+        return f"""# COCO polygons → rotated boxes (mmrotate dota_coco pattern).
+_pad_resize_pipeline = [
+    dict(type='LoadImageFromFile', backend_args=None),
+    dict(type='LoadAnnotations', with_bbox=True, with_mask=True, poly2mask=False),
+    dict(type='ConvertMask2BoxType', box_type='rbox'),
+    dict(type='Resize', scale=({image_size}, {image_size}), keep_ratio=True),
+    dict(type='Pad', size_divisor=32),
+    dict(type='RandomFlip', prob=0.5),
+    dict(
+        type='PackDetInputs',
+        meta_keys=('img_id', 'img_path', 'ori_shape', 'img_shape', 'scale_factor'),
+    ),
+]
+train_pipeline = list(_pad_resize_pipeline)
+train_pipeline_stage2 = list(_pad_resize_pipeline)
+test_pipeline = [
+    dict(type='LoadImageFromFile', backend_args=None),
+    dict(type='Resize', scale=({image_size}, {image_size}), keep_ratio=True),
+    dict(type='Pad', size_divisor=32),
+    dict(type='LoadAnnotations', with_bbox=True, with_mask=True, poly2mask=False),
+    dict(type='ConvertMask2BoxType', box_type='qbox'),
+    dict(
+        type='PackDetInputs',
+        meta_keys=('img_id', 'img_path', 'ori_shape', 'img_shape', 'scale_factor'),
+    ),
+]"""
+    return f"""# Simple pipelines without Mosaic/Albu — the base YOLOv8 config uses albumentations in
 # train_pipeline_stage2 (via PipelineSwitchHook) which requires img_path and breaks
 # with our absolute-path COCO setup. Reuse the same safe pipeline for stage-2 as well.
 _pad_resize_pipeline = [
@@ -257,7 +274,84 @@ test_pipeline = [
     dict(type='Pad', size_divisor=32),
     dict(type='LoadAnnotations', with_bbox=True),
     dict(type='PackDetInputs', meta_keys=('img_id', 'img_path', 'ori_shape', 'img_shape', 'scale_factor')),
-]
+]"""
+
+
+def _build_dataloader_block(params: MMYOLOConfigParams, *, is_rotated: bool) -> str:
+    dataset_type_line = "        type='mmdet.CocoDataset',\n" if is_rotated else ""
+    return f"""train_dataloader = dict(
+    batch_size={params.batch_size},
+    num_workers=4,
+    dataset=dict(
+{dataset_type_line}        data_root='',
+        ann_file='{params.train_json_abs}',
+        data_prefix=dict(img='{params.train_images_abs}/'),
+        metainfo=dict(classes=_classes),
+        pipeline=train_pipeline,
+    ),
+)
+val_dataloader = dict(
+    batch_size=1,
+    num_workers=2,
+    dataset=dict(
+{dataset_type_line}        data_root='',
+        ann_file='{params.val_json_abs}',
+        data_prefix=dict(img='{params.val_images_abs}/'),
+        metainfo=dict(classes=_classes),
+        pipeline=test_pipeline,
+    ),
+)
+test_dataloader = val_dataloader"""
+
+
+def _build_evaluator_block(params: MMYOLOConfigParams, *, is_rotated: bool) -> str:
+    if is_rotated:
+        return f"""val_evaluator = dict(
+    type='mmrotate.RotatedCocoMetric',
+    ann_file='{params.val_json_abs}',
+    metric='bbox',
+    format_only=False,
+)
+test_evaluator = val_evaluator"""
+    return f"""val_evaluator = dict(
+    type='mmdet.CocoMetric',
+    ann_file='{params.val_json_abs}',
+    metric=['bbox'],
+    format_only=False,
+)
+test_evaluator = val_evaluator"""
+
+
+def build_mmyolo_config_content(params: MMYOLOConfigParams) -> str:
+    """Generate the full mmyolo_config.py file content."""
+    is_rotated = _is_rotated_arch(params.arch)
+    model_override = build_model_override(
+        params.num_classes,
+        is_dji_mode=params.is_dji_mode,
+        dji_use_widen_factor_025=params.dji_use_widen_factor_025,
+    )
+    image_size = params.image_size
+    val_interval = max(1, min(10, max(1, params.epochs // 3)))
+    load_from_line = build_mmyolo_load_from_line(
+        params.base_cfg,
+        is_dji_mode=params.is_dji_mode,
+        dji_use_widen_factor_025=params.dji_use_widen_factor_025,
+    )
+    visualizer_line = (
+        "visualizer = dict(type='mmrotate.RotLocalVisualizer')\n"
+        if is_rotated
+        else ""
+    )
+
+    return f"""_base_ = ['{params.base_cfg}']
+
+# Ultralytics loads *.pt pretrained weights by default; MMYOLO base runtime uses load_from=None.
+{load_from_line}
+
+# Ensure evaluator/visualizer registry entries are loaded.
+{_build_custom_imports_line(is_rotated=is_rotated)}
+{visualizer_line}
+{_build_pipeline_block(image_size=image_size, is_rotated=is_rotated)}
 
 max_epochs = {params.epochs}
 num_classes = {params.num_classes}
@@ -302,38 +396,10 @@ custom_hooks = [
 _classes = {params.class_names_py}
 
 # Use absolute paths to avoid ambiguity with data_root
-train_dataloader = dict(
-    batch_size={params.batch_size},
-    num_workers=4,
-    dataset=dict(
-        data_root='',
-        ann_file='{params.train_json_abs}',
-        data_prefix=dict(img='{params.train_images_abs}/'),
-        metainfo=dict(classes=_classes),
-        pipeline=train_pipeline,
-    ),
-)
-val_dataloader = dict(
-    batch_size=1,
-    num_workers=2,
-    dataset=dict(
-        data_root='',
-        ann_file='{params.val_json_abs}',
-        data_prefix=dict(img='{params.val_images_abs}/'),
-        metainfo=dict(classes=_classes),
-        pipeline=test_pipeline,
-    ),
-)
-test_dataloader = val_dataloader
+{_build_dataloader_block(params, is_rotated=is_rotated)}
 
 # Evaluators must use absolute annotation file paths
-val_evaluator = dict(
-    type='mmdet.CocoMetric',
-    ann_file='{params.val_json_abs}',
-    metric=['bbox'],
-    format_only=False,
-)
-test_evaluator = val_evaluator
+{_build_evaluator_block(params, is_rotated=is_rotated)}
 
 {model_override}
 """

@@ -77,7 +77,10 @@ RUN PYTHONPATH= ${MMYOLO_ENV}/bin/pip install --no-cache-dir -r /opt/mmyolo/requ
 
 RUN PYTHONPATH= ${MMYOLO_ENV}/bin/pip install --no-cache-dir -e /opt/mmyolo
 
-RUN ${MMYOLO_PYTHON} -c "import mmengine, mmcv, mmdet, mmyolo; print('mmyolo stack ok', mmcv.__version__)"
+# RTMDet-R (oriented) requires mmrotate for RotLocalVisualizer, RotatedIoULoss, metrics, etc.
+RUN PYTHONPATH= ${MMYOLO_ENV}/bin/pip install --no-cache-dir "mmrotate==1.0.0rc1"
+
+RUN ${MMYOLO_PYTHON} -c "import mmengine, mmcv, mmdet, mmyolo, mmrotate; print('mmyolo stack ok', mmcv.__version__, mmrotate.__version__)"
 
 RUN env -u PYTHONPATH GLIBC_TUNABLES=glibc.rtld.execstack=2 \
     ${MMYOLO_PYTHON} -c "import torch; from mmdet.apis import init_detector; print('mmyolo torch ok', torch.__version__)"

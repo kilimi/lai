@@ -113,6 +113,23 @@ interface ModelConfig {
 
 type TrainTask = 'detect' | 'segment' | 'oriented' | 'classify';
 type DeployTarget = 'general' | 'edge-drone';
+type TrainModelKey = 'yolo' | 'rf-detr' | 'mmyolo';
+
+function defaultTrainingEpochs(model: TrainModelKey | string | null | undefined): number {
+  return model === 'mmyolo' ? 300 : 100;
+}
+
+function resolvedTrainingEpochs(
+  model: TrainModelKey | string | null | undefined,
+  settings: { epochs?: number | string | null },
+): number {
+  const raw = settings?.epochs;
+  const n = typeof raw === 'string' ? Number(raw) : raw;
+  if (typeof n === 'number' && Number.isFinite(n) && n > 0) {
+    return Math.round(n);
+  }
+  return defaultTrainingEpochs(model);
+}
 
 const TASK_LABELS: Record<TrainTask, string> = {
   detect: 'Detection (boxes)',
@@ -928,6 +945,7 @@ export function TrainModelModal({ open, onOpenChange, datasets = [], datasetGrou
 
       let response;
       let modelName = '';
+      const trainingEpochs = resolvedTrainingEpochs(selectedModel, modelSettings);
 
       if (selectedModel === 'yolo') {
         // Always derive model_type from the active task selection in this modal.
@@ -955,7 +973,7 @@ export function TrainModelModal({ open, onOpenChange, datasets = [], datasetGrou
           project_id: parseInt(projectId),
           dataset_configs: datasetConfigs,
           model_type: modelType,
-          epochs: modelSettings.epochs || 100,
+          epochs: trainingEpochs,
           batch_size: modelSettings.batchSize || 16,
           image_size: modelSettings.imageSize || 640,
           device: modelSettings.device || '0',
@@ -988,7 +1006,7 @@ export function TrainModelModal({ open, onOpenChange, datasets = [], datasetGrou
           project_id: parseInt(projectId),
           dataset_configs: datasetConfigs,
           model_type: modelType.endsWith('.pt') ? modelType : `${modelType}.pt`,
-          epochs: modelSettings.epochs || 100,
+          epochs: trainingEpochs,
           batch_size: modelSettings.batchSize || 16,
           image_size: modelSettings.imageSize || 640,
           device: modelSettings.device || '0',
@@ -1023,7 +1041,7 @@ export function TrainModelModal({ open, onOpenChange, datasets = [], datasetGrou
           arch,
           size,
           task: mmyoloTask,
-          epochs: modelSettings.epochs || 300,
+          epochs: trainingEpochs,
           batch_size: modelSettings.batchSize || 16,
           image_size: modelSettings.imageSize || 640,
           device: modelSettings.device || '0',
@@ -1065,7 +1083,7 @@ export function TrainModelModal({ open, onOpenChange, datasets = [], datasetGrou
           taskId: taskId || 'unknown',
           modelName: modelName,
           datasetsCount: selectedDatasets.length,
-          epochs: modelSettings.epochs || 100,
+          epochs: trainingEpochs,
           weightsDownloadNotice: downloadNotice
         });
 
@@ -2278,7 +2296,7 @@ export function TrainModelModal({ open, onOpenChange, datasets = [], datasetGrou
                         )}
                         <div>
                           <span className="text-muted-foreground text-xs">Epochs</span>
-                          <p className="font-medium">{modelSettings.epochs || 100}</p>
+                          <p className="font-medium">{resolvedTrainingEpochs(selectedModel, modelSettings)}</p>
                         </div>
                         <div>
                           <span className="text-muted-foreground text-xs">Datasets</span>

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   Dialog,
   DialogContent,
@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { Progress } from "@/components/ui/progress";
 import { Download, Loader2, AlertCircle } from "lucide-react";
 import {
   Select,
@@ -18,7 +19,11 @@ import {
 } from "@/components/ui/select";
 import { useToast } from '@/hooks/use-toast';
 import { getApiBaseUrl } from "@/config/api";
-import { attachmentFilenameFromContentDisposition } from "@/lib/evaluationTableDisplay";
+import {
+  downloadFileWithProgress,
+  type DownloadProgressUpdate,
+} from "@/utils/downloadFile";
+import { formatFileSize } from "@/utils/utils";
 
 interface DownloadModelModalProps {
   open: boolean;
@@ -34,6 +39,42 @@ interface Checkpoint {
   size?: number;
 }
 
+const INITIAL_PROGRESS: DownloadProgressUpdate = {
+  phase: 'preparing',
+  loaded: 0,
+  total: null,
+  percent: null,
+};
+
+function progressLabel(update: DownloadProgressUpdate, expectedBytes?: number): string {
+  const total = update.total ?? (expectedBytes && expectedBytes > 0 ? expectedBytes : null);
+
+  if (update.phase === 'preparing') {
+    return 'Preparing download on server (packaging checkpoint)…';
+  }
+  if (update.phase === 'saving') {
+    return 'Saving file to your computer…';
+  }
+  if (update.percent != null && total) {
+    return `Downloading… ${formatFileSize(update.loaded)} of ${formatFileSize(total)} (${update.percent}%)`;
+  }
+  if (total) {
+    const pct = Math.min(100, Math.round((update.loaded / total) * 100));
+    return `Downloading… ${formatFileSize(update.loaded)} of ${formatFileSize(total)} (${pct}%)`;
+  }
+  return `Downloading… ${formatFileSize(update.loaded)} received`;
+}
+
+function progressValue(update: DownloadProgressUpdate, expectedBytes?: number): number | null {
+  if (update.phase === 'preparing') return null;
+  if (update.percent != null) return update.percent;
+  const total = update.total ?? (expectedBytes && expectedBytes > 0 ? expectedBytes : null);
+  if (total && total > 0) {
+    return Math.min(100, Math.round((update.loaded / total) * 100));
+  }
+  return null;
+}
+
 export function DownloadModelModal({
   open,
   onOpenChange,
@@ -41,16 +82,27 @@ export function DownloadModelModal({
   taskName,
 }: DownloadModelModalProps) {
   const { toast } = useToast();
+  const abortRef = useRef<AbortController | null>(null);
   const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([]);
   const [selectedCheckpoint, setSelectedCheckpoint] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [loadingCheckpoints, setLoadingCheckpoints] = useState(true);
+  const [downloadProgress, setDownloadProgress] = useState<DownloadProgressUpdate>(INITIAL_PROGRESS);
+
+  const resetDownloadState = useCallback(() => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setLoading(false);
+    setDownloadProgress(INITIAL_PROGRESS);
+  }, []);
 
   useEffect(() => {
     if (open && taskId) {
       fetchCheckpoints();
+    } else if (!open) {
+      resetDownloadState();
     }
-  }, [open, taskId]);
+  }, [open, taskId, resetDownloadState]);
 
   const fetchCheckpoints = async () => {
     setLoadingCheckpoints(true);
@@ -60,7 +112,6 @@ export function DownloadModelModal({
         const data = await response.json();
         if (data.success) {
           setCheckpoints(data.checkpoints || []);
-          // Auto-select first checkpoint if available
           if (data.checkpoints && data.checkpoints.length > 0) {
             setSelectedCheckpoint(data.checkpoints[0].name);
           }
@@ -78,6 +129,13 @@ export function DownloadModelModal({
     }
   };
 
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen && loading) {
+      resetDownloadState();
+    }
+    onOpenChange(nextOpen);
+  };
+
   const handleDownload = async () => {
     if (!selectedCheckpoint) {
       toast({
@@ -88,53 +146,57 @@ export function DownloadModelModal({
       return;
     }
 
+    const controller = new AbortController();
+    abortRef.current = controller;
     setLoading(true);
+    setDownloadProgress(INITIAL_PROGRESS);
+
+    const selected = checkpoints.find((c) => c.name === selectedCheckpoint);
+    const expectedBytes = selected?.size;
+
     try {
-      const response = await fetch(
+      await downloadFileWithProgress(
         `${getApiBaseUrl()}/training/${taskId}/download?checkpoint=${encodeURIComponent(selectedCheckpoint)}`,
-        { method: 'GET' }
+        {
+          filenameFallback: `${taskName}_${selectedCheckpoint}.zip`,
+          signal: controller.signal,
+          onProgress: setDownloadProgress,
+        },
       );
 
-      if (!response.ok) {
-        throw new Error('Download failed');
-      }
-
-      // Get filename from Content-Disposition header or use default
-      const contentDisposition = response.headers.get('Content-Disposition');
-      let filename = `${taskName}_${selectedCheckpoint}.zip`;
-      const headerFilename = attachmentFilenameFromContentDisposition(contentDisposition);
-      if (headerFilename) filename = headerFilename;
-
-      // Create blob and download
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-
       toast({
-        title: "Download started",
-        description: `Downloading ${selectedCheckpoint}...`,
+        title: "Download complete",
+        description: `${selectedCheckpoint} saved to your downloads folder.`,
       });
 
       onOpenChange(false);
     } catch (error) {
+      if (controller.signal.aborted) {
+        toast({
+          title: "Download cancelled",
+          description: "The download was stopped.",
+        });
+        return;
+      }
       toast({
         title: "Error",
         description: error instanceof Error ? error.message : "Failed to download model",
         variant: "destructive",
       });
     } finally {
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+      }
       setLoading(false);
+      setDownloadProgress(INITIAL_PROGRESS);
     }
   };
 
+  const barValue = progressValue(downloadProgress, checkpoints.find((c) => c.name === selectedCheckpoint)?.size);
+  const showIndeterminate = loading && barValue === null;
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
@@ -161,7 +223,11 @@ export function DownloadModelModal({
             <>
               <div className="space-y-2">
                 <Label htmlFor="checkpoint-select">Checkpoint</Label>
-                <Select value={selectedCheckpoint} onValueChange={setSelectedCheckpoint}>
+                <Select
+                  value={selectedCheckpoint}
+                  onValueChange={setSelectedCheckpoint}
+                  disabled={loading}
+                >
                   <SelectTrigger id="checkpoint-select">
                     <SelectValue placeholder="Select a checkpoint" />
                   </SelectTrigger>
@@ -190,11 +256,30 @@ export function DownloadModelModal({
                   </div>
                   {checkpoints.find(c => c.name === selectedCheckpoint)?.size && (
                     <div className="flex justify-between mt-1">
-                      <span className="text-muted-foreground">Size:</span>
+                      <span className="text-muted-foreground">Approx. size:</span>
                       <span className="font-medium">
-                        {(checkpoints.find(c => c.name === selectedCheckpoint)!.size! / (1024 * 1024)).toFixed(2)} MB
+                        {formatFileSize(checkpoints.find(c => c.name === selectedCheckpoint)!.size!)}
+                        <span className="text-muted-foreground font-normal"> (+ metadata in zip)</span>
                       </span>
                     </div>
+                  )}
+                </div>
+              )}
+
+              {loading && (
+                <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
+                  <p className="text-sm text-muted-foreground">
+                    {progressLabel(
+                      downloadProgress,
+                      checkpoints.find((c) => c.name === selectedCheckpoint)?.size,
+                    )}
+                  </p>
+                  {showIndeterminate ? (
+                    <div className="relative h-4 w-full overflow-hidden rounded-full bg-secondary">
+                      <div className="absolute inset-y-0 left-0 w-1/3 animate-pulse rounded-full bg-primary" />
+                    </div>
+                  ) : (
+                    <Progress value={barValue ?? 0} className="h-4" />
                   )}
                 </div>
               )}
@@ -203,8 +288,8 @@ export function DownloadModelModal({
         </div>
 
         <div className="flex justify-end gap-2">
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={loading}>
-            Cancel
+          <Button variant="outline" onClick={() => handleOpenChange(false)} disabled={false}>
+            {loading ? 'Cancel' : 'Close'}
           </Button>
           <Button
             onClick={handleDownload}
@@ -213,7 +298,7 @@ export function DownloadModelModal({
             {loading ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Downloading...
+                Downloading…
               </>
             ) : (
               <>

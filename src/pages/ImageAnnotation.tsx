@@ -90,6 +90,7 @@ import {
   SAM_MODEL_WAIT_OVERLAY_MS,
   DEFAULT_COLORS,
   bboxToRectPoints,
+  bboxToRectPointsInPixelSpace,
   buildAutoSegmentMaskOverlayStyle,
   calculatePolygonArea,
   findCocoImageForDatasetName,
@@ -1608,7 +1609,7 @@ const ImageAnnotation = () => {
                   points.push({ x: Math.max(0, Math.min(x, imageWidth - 1)), y: Math.max(0, Math.min(y, imageHeight - 1)) });
                 }
               } else if (Array.isArray(ann.bbox) && ann.bbox.length >= 4) {
-                const rect = bboxToRectPoints(ann.bbox);
+                const rect = bboxToRectPointsInPixelSpace(ann.bbox, imageWidth, imageHeight);
                 rect.forEach((p) => {
                   points.push({
                     x: Math.max(0, Math.min(p.x, imageWidth - 1)),
@@ -2737,7 +2738,11 @@ const ImageAnnotation = () => {
                 });
               }
             } else if (className && Array.isArray(annotation.bbox) && annotation.bbox.length >= 4) {
-              const points = bboxToRectPoints(annotation.bbox);
+              const points = bboxToRectPointsInPixelSpace(
+                annotation.bbox,
+                imageEntry.width,
+                imageEntry.height,
+              );
               if (points.length >= 4) {
                 imageAnnotations.push({
                   id: `annotation_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -4611,7 +4616,7 @@ const ImageAnnotation = () => {
           });
         }
       } else if (Array.isArray(ann.bbox) && ann.bbox.length >= 4) {
-        bboxToRectPoints(ann.bbox).forEach((p) => {
+        bboxToRectPointsInPixelSpace(ann.bbox, imageWidth, imageHeight).forEach((p) => {
           points.push({
             x: Math.max(0, Math.min(p.x, imageWidth - 1)),
             y: Math.max(0, Math.min(p.y, imageHeight - 1)),

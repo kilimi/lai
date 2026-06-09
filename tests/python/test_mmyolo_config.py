@@ -126,6 +126,22 @@ def test_normalize_config_stem_rtmdet_ins():
     assert _normalize_config_stem("rtmdet-ins_s.py") == "rtmdet-ins_s_8xb32-300e_coco"
 
 
+def test_generated_config_rtmdet_r_includes_mmrotate_and_coco_oriented_pipelines():
+    content = build_mmyolo_config_content(
+        _sample_params(
+            arch="rtmdet-r",
+            base_cfg="rtmdet-r_s_fast_1xb8-36e_dota.py",
+            is_dji_mode=False,
+        )
+    )
+    assert "'mmrotate'" in content
+    assert "visualizer = dict(type='mmrotate.RotLocalVisualizer')" in content
+    assert "type='mmdet.CocoDataset'" in content
+    assert "ConvertMask2BoxType" in content
+    assert "type='mmrotate.RotatedCocoMetric'" in content
+    assert "type='mmdet.CocoMetric'" not in content
+
+
 def test_generated_config_skips_pretrained_for_dji_widen_025():
     content = build_mmyolo_config_content(
         _sample_params(

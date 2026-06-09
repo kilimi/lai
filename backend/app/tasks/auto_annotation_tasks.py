@@ -91,6 +91,25 @@ def polygon_to_bbox(polygon: List[float]) -> List[float]:
     return [min_x, min_y, max_x - min_x, max_y - min_y]
 
 
+def xyxy_to_normalized_bbox(
+    x1: float,
+    y1: float,
+    x2: float,
+    y2: float,
+    img_width: int,
+    img_height: int,
+) -> tuple[List[float], float]:
+    """Convert YOLO xyxy pixel box to normalized COCO [x, y, w, h] and fractional area."""
+    w = float(img_width or 1) or 1.0
+    h = float(img_height or 1) or 1.0
+    bbox_x = float(x1) / w
+    bbox_y = float(y1) / h
+    bbox_width = float(x2 - x1) / w
+    bbox_height = float(y2 - y1) / h
+    bbox = [bbox_x, bbox_y, bbox_width, bbox_height]
+    return bbox, bbox_width * bbox_height
+
+
 def calculate_polygon_area(polygon: List[float]) -> float:
     """Calculate area of polygon using shoelace formula"""
     if not polygon or len(polygon) < 6:  # Need at least 3 points
@@ -243,16 +262,15 @@ def auto_annotate_yolo(
             # Check if class already exists
             existing_class = db.query(AnnotationClass).filter(
                 AnnotationClass.annotation_file_id == annotation_file_id,
-                AnnotationClass.name == class_name
+                AnnotationClass.class_name == class_name
             ).first()
             
             if existing_class:
                 annotation_classes[class_name] = existing_class
             else:
                 ann_class = AnnotationClass(
-                    id=str(uuid.uuid4()),
                     annotation_file_id=annotation_file_id,
-                    name=class_name,
+                    class_name=class_name,
                     category_id=idx + 1
                 )
                 db.add(ann_class)
@@ -296,14 +314,16 @@ def auto_annotate_yolo(
             
             result = results[0]
             
-            # Get image dimensions
+            # Get image dimensions from inference (authoritative for annotation coords)
             img_height, img_width = result.orig_shape
-            
+            if img.width != img_width or img.height != img_height:
+                img.width = img_width
+                img.height = img_height
+
             # Create AnnotationFileImage record
             ann_file_img = AnnotationFileImage(
-                id=str(uuid.uuid4()),
                 annotation_file_id=annotation_file_id,
-                image_id=img.id,
+                dataset_image_id=img.id,
                 file_name=img.file_name,
                 width=img_width,
                 height=img_height
@@ -324,20 +344,18 @@ def auto_annotate_yolo(
                     
                     class_name = class_names[class_id]
                     
-                    # Get bounding box (xyxy format)
+                    # Get bounding box (xyxy format) and store normalized 0–1 (DB contract)
                     xyxy = box.xyxy[0].cpu().numpy()
                     x1, y1, x2, y2 = xyxy
+                    bbox, area = xyxy_to_normalized_bbox(
+                        float(x1), float(y1), float(x2), float(y2), img_width, img_height
+                    )
+                    bbox_x, bbox_y, bbox_width, bbox_height = bbox
                     
-                    # Convert to COCO format (x, y, width, height)
-                    bbox_x = float(x1)
-                    bbox_y = float(y1)
-                    bbox_width = float(x2 - x1)
-                    bbox_height = float(y2 - y1)
-                    bbox = [bbox_x, bbox_y, bbox_width, bbox_height]
-                    
-                    # Get segmentation if available
+                    # Get segmentation if available (pixel coords; COCO convention)
                     segmentation = None
-                    area = bbox_width * bbox_height
+                    w = float(img_width or 1) or 1.0
+                    h = float(img_height or 1) or 1.0
                     
                     if use_seg and hasattr(result, 'masks') and result.masks is not None:
                         try:
@@ -348,16 +366,16 @@ def auto_annotate_yolo(
                                     # Flatten the coordinates into COCO segmentation format
                                     segmentation = [float(coord) for point in mask_coords for coord in point]
                                     
-                                    # Calculate polygon area
-                                    area = calculate_polygon_area(segmentation)
+                                    # Fractional area relative to image (matches preannotate)
+                                    area = calculate_polygon_area(segmentation) / (w * h)
                         except Exception as e:
                             logger.warning(f"Failed to extract segmentation for box {box_idx}: {e}")
                     
                     # Create annotation
                     annotation = Annotation(
-                        id=str(uuid.uuid4()),
                         annotation_file_id=annotation_file_id,
                         image_id=img.id,
+                        dataset_id=dataset_id,
                         category=class_name,
                         category_id=class_id + 1,
                         bbox_x=bbox_x,
@@ -368,7 +386,6 @@ def auto_annotate_yolo(
                         segmentation=segmentation,
                         area=area,
                         confidence=confidence,
-                        iscrowd=0
                     )
                     
                     db.add(annotation)

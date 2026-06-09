@@ -25,6 +25,25 @@ export const bboxToRectPoints = (bbox: number[]): Point[] => {
   ];
 };
 
+/** Convert COCO/API bbox to rectangle corners in pixel space (handles normalized 0–1). */
+export const bboxToRectPointsInPixelSpace = (
+  bbox: number[],
+  imageWidth?: number,
+  imageHeight?: number,
+): Point[] => {
+  if (!Array.isArray(bbox) || bbox.length < 4) return [];
+  let [x, y, w, h] = bbox.map((v) => Number(v) || 0);
+  const iw = imageWidth && imageWidth > 0 ? imageWidth : 0;
+  const ih = imageHeight && imageHeight > 0 ? imageHeight : 0;
+  if (iw > 1 && ih > 1 && x <= 1 && y <= 1 && w <= 1 && h <= 1) {
+    x *= iw;
+    y *= ih;
+    w *= iw;
+    h *= ih;
+  }
+  return bboxToRectPoints([x, y, w, h]);
+};
+
 export function isDepthLikeCollectionName(name: string): boolean {
   const n = name.toLowerCase();
   return /\bdepth\b/.test(n) || n.includes('depth map') || n.includes('depth-map');

@@ -417,6 +417,7 @@ def train_mmyolo_model(self, task_id: int, training_config: Dict[str, Any]):
                 val_images_abs=val_images_abs,
                 is_dji_mode=is_dji_mode,
                 dji_use_widen_factor_025=dji_use_widen_factor_025,
+                arch=arch,
             )
         )
 

@@ -1243,8 +1243,8 @@ async def get_annotation_data(
             "confidence": ann.confidence,
             "cocoImageId": ann.coco_image_id,
             "cocoAnnotationId": ann.coco_annotation_id,
-            "imageWidth": dims[0],
-            "imageHeight": dims[1]
+            "imageWidth": img_w,
+            "imageHeight": img_h,
         })
     
     return {
@@ -1285,6 +1285,21 @@ async def get_annotations_for_image(
     if not image:
         raise HTTPException(status_code=404, detail=f"Image '{image_filename}' not found in dataset")
 
+    ann_file_img = db.query(AnnotationFileImage).filter(
+        AnnotationFileImage.annotation_file_id == annotation_file_id,
+        AnnotationFileImage.dataset_image_id == image.id,
+    ).first()
+    img_w = (
+        ann_file_img.width
+        if ann_file_img and ann_file_img.width
+        else (image.width or 1)
+    )
+    img_h = (
+        ann_file_img.height
+        if ann_file_img and ann_file_img.height
+        else (image.height or 1)
+    )
+
     annotations = db.query(Annotation).filter(
         and_(
             Annotation.annotation_file_id == annotation_file_id,
@@ -1306,12 +1321,15 @@ async def get_annotations_for_image(
             flat = seg if isinstance(first, (int, float)) else (first if isinstance(first, list) else seg)
         else:
             flat = []
+        pixel_bbox = annotation_bbox_pixel_xywh(
+            ann, img_width=img_w, img_height=img_h
+        )
         result.append({
             "id": ann.id,
             "className": cls_info["name"],
             "color": cls_info["color"],
             "segmentation": flat,
-            "bbox": ann.bbox,
+            "bbox": pixel_bbox,
             "area": ann.area,
             "confidence": ann.confidence,
         })
@@ -1320,8 +1338,8 @@ async def get_annotations_for_image(
         "success": True,
         "data": {
             "annotations": result,
-            "imageWidth": image.width or 1,
-            "imageHeight": image.height or 1,
+            "imageWidth": img_w,
+            "imageHeight": img_h,
             "imageFilename": image.file_name,
             "imageId": image.id,
         }
