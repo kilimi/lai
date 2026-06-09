@@ -200,7 +200,7 @@ def _apply_setup(
     lai_depth_models: str = "all",
     bind_host_backend: bool = True,
     lai_repo_root: str | None = None,
-    gpu_tier: bool = False,
+    gpu_tier: bool = True,
 ) -> None:
     data_path = Path(data_dir).expanduser().resolve()
     data_path.mkdir(parents=True, exist_ok=True)
@@ -328,7 +328,7 @@ def run_wizard(bundle_root: Path, *, open_browser: bool = True) -> int:
     dev_checkout = is_developer_checkout(bundle_root)
     bind_yes_checked = "checked" if dev_checkout else ""
     bind_no_checked = "" if dev_checkout else "checked"
-    gpu_tier_checked = ""
+    gpu_tier_checked = "checked"
 
     def make_handler() -> type[BaseHTTPRequestHandler]:
         class Handler(BaseHTTPRequestHandler):

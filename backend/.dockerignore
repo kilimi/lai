@@ -71,5 +71,25 @@ backups/
 runs/
 static/inference_results/
 
+# Maintainer one-off scripts (live under scripts/archive/ or repo scripts/)
+add_database_indexes.py
+add_merge_indexes.py
+check_*.py
+debug_routes.py
+fix_*.py
+find_*.py
+inspect_*.py
+migrate_*.py
+profile_queries.py
+repair_*.py
+reset_database.py
+update_annotation_types.py
+install_albumentations.py
+*.bat
+CLI_TRAINING_COMMANDS.sh
+manage_training.sh
+calibration.json
+*.docx
+
 # Other Dockerfiles / training-only assets
 # Inpainting image is built separately (see dockers/backend/Dockerfile.inpainting.stable)

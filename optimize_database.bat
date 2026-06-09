@@ -17,7 +17,8 @@ echo ✅ Docker container is running
 
 REM Run the database optimization script inside the container
 echo 📊 Running database performance analysis and optimization...
-docker exec -it lai-backend-1 python add_database_indexes.py
+docker cp scripts/archive/backend/add_database_indexes.py lai-backend-1:/tmp/add_database_indexes.py
+docker exec -it lai-backend-1 python /tmp/add_database_indexes.py
 
 if %errorlevel% equ 0 (
     echo ✅ Database optimization completed successfully!

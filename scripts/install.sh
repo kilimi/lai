@@ -157,15 +157,15 @@ echo "  Enables worker-gpu + sam_service for training, auto-annotate, and SAM."
 echo "  Requires NVIDIA GPU + Container Toolkit. CPU-only installs can still annotate datasets."
 echo ""
 if [[ "$YES" -eq 1 ]]; then
-  case "${LAI_GPU_TIER:-0}" in
-    1|true|yes|YES) GPU_TIER=1 ;;
-    *) GPU_TIER=0 ;;
+  case "${LAI_GPU_TIER:-1}" in
+    0|false|no|NO) GPU_TIER=0 ;;
+    *) GPU_TIER=1 ;;
   esac
 else
-  read -r -p "Enable GPU tier (training / SAM)? [y/N] " gt || true
-  case "${gt:-N}" in
-    [Yy]*) GPU_TIER=1 ;;
-    *) GPU_TIER=0 ;;
+  read -r -p "Enable GPU tier (training / SAM)? [Y/n] " gt || true
+  case "${gt:-Y}" in
+    [Nn]*) GPU_TIER=0 ;;
+    *) GPU_TIER=1 ;;
   esac
 fi
 

@@ -7,9 +7,19 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 backend_debug.log
+mmyolo-build.log
 backend/backups/
 node_modules
+bun.lock
+
+# Foreign / local clones (not part of LAI)
+geti/
+
+# Test artifacts
+playwright-report/
+test-results/
 backend/.bash_history
+backend/.config/
 # Local Docker / data (compose defaults)
 .lai-data/
 .lai/

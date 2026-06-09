@@ -28,8 +28,8 @@ classifiers = [
 lai = "lai.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/lulu/lai"
-Documentation = "https://github.com/lulu/lai/blob/main/docs/INSTALL_USERS.md"
+Homepage = "https://laivision.dk"
+Documentation = "https://github.com/kilimi/lai/blob/main/README.md"
 Repository = "https://github.com/lulu/lai"
 Issues = "https://github.com/lulu/lai/issues"
 

@@ -12,7 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_check_no_hardcoded_api_url_script_passes():
-    script = REPO_ROOT / "scripts" / "check_no_hardcoded_api_url.py"
+    script = REPO_ROOT / "scripts" / "archive" / "check_no_hardcoded_api_url.py"
     result = subprocess.run(
         [sys.executable, str(script)],
         cwd=REPO_ROOT,
