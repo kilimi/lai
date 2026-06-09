@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, Link, useOutletContext } from 'react-router-dom';
+import { useParams, Link, useOutletContext, useLocation } from 'react-router-dom';
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -40,8 +40,28 @@ interface OutletContext {
   refreshProject?: () => void;
 }
 
+/** Keep a freshly uploaded logo when list API omits data: URLs (include_thumbnails=false). */
+type PreservedDatasetThumb = {
+  datasetId: number;
+  thumbnailUrl?: string;
+};
+
+function applyPreservedThumbnails(
+  items: Dataset[],
+  preserved?: PreservedDatasetThumb,
+): Dataset[] {
+  const thumb = preserved?.thumbnailUrl?.trim();
+  if (!preserved || !thumb) return items;
+  return items.map((d) =>
+    d.id === preserved.datasetId
+      ? { ...d, thumbnailUrl: thumb, logo_url: thumb }
+      : d,
+  );
+}
+
 export default function ProjectDatasets() {
   const { id } = useParams<{ id: string }>();
+  const location = useLocation();
   const { project, refreshProject } = useOutletContext<OutletContext>();
   const { api } = useApi();
   const { toast } = useToast();
@@ -72,7 +92,7 @@ export default function ProjectDatasets() {
   const [isDeletingGroup, setIsDeletingGroup] = useState(false);
 
   // Fetch datasets for the project
-  const fetchProjectDatasets = async () => {
+  const fetchProjectDatasets = async (preserved?: PreservedDatasetThumb) => {
     if (!id) return;
     
     setIsLoading(true);
@@ -85,7 +105,7 @@ export default function ProjectDatasets() {
       if (response.ok) {
         const result = await response.json();
         if (result.success && result.data) {
-          setDatasets(result.data);
+          setDatasets(applyPreservedThumbnails(result.data, preserved));
         }
       }
     } catch (error) {
@@ -113,7 +133,9 @@ export default function ProjectDatasets() {
   };
 
   useEffect(() => {
-    fetchProjectDatasets();
+    const preserved = (location.state as { preservedDatasetThumb?: PreservedDatasetThumb } | null)
+      ?.preservedDatasetThumb;
+    fetchProjectDatasets(preserved);
     fetchDatasetGroups();
   }, [id]);
 
@@ -289,15 +311,31 @@ export default function ProjectDatasets() {
   };
 
   const handleDatasetUpdated = (updatedDataset?: Dataset) => {
-    // If we have the updated dataset, update it in the local state immediately
-    // This provides instant feedback while the full refresh happens
+    const preserved: PreservedDatasetThumb | undefined = updatedDataset
+      ? {
+          datasetId: updatedDataset.id,
+          thumbnailUrl: updatedDataset.thumbnailUrl ?? updatedDataset.logo_url,
+        }
+      : undefined;
+
     if (updatedDataset) {
-      setDatasets(prevDatasets => 
-        prevDatasets.map(d => d.id === updatedDataset.id ? updatedDataset : d)
+      setDatasets((prevDatasets) =>
+        prevDatasets.map((d) =>
+          d.id === updatedDataset.id ? { ...d, ...updatedDataset } : d,
+        ),
+      );
+      setDatasetGroups((prevGroups) =>
+        prevGroups.map((g) => ({
+          ...g,
+          datasets: g.datasets.map((d) =>
+            d.id === updatedDataset.id ? { ...d, ...updatedDataset } : d,
+          ),
+        })),
       );
     }
-    // Also refresh the full list to ensure consistency
-    fetchProjectDatasets();
+
+    // Refresh counts/metadata; preserve custom logo from PUT response (list API strips data: URLs).
+    fetchProjectDatasets(preserved);
   };
 
   const handleDatasetMoved = (datasetId: number, _targetProjectId: number) => {

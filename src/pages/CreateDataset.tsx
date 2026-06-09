@@ -70,8 +70,19 @@ const CreateDataset = ({ projectMode = false }: CreateDatasetProps) => {
         description: `${data.name} has been created successfully.`,
       });
 
-      // Navigate based on the mode
-      navigate(`/projects/${projectId}/datasets`);
+      // Navigate based on the mode; pass logo so list view shows it immediately
+      // (project datasets list omits data: URLs unless explicitly preserved).
+      const created = response.data;
+      navigate(`/projects/${projectId}/datasets`, {
+        state: created?.id
+          ? {
+              preservedDatasetThumb: {
+                datasetId: created.id,
+                thumbnailUrl: created.thumbnailUrl ?? created.logo_url,
+              },
+            }
+          : undefined,
+      });
     } catch (err) {
       console.error('Error creating:', err);
       toast({
