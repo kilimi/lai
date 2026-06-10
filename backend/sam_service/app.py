@@ -4,6 +4,7 @@ Unified SAM service: Segment Anything Model 2 and 3 in one container.
 - SAM 3: point / box / text prompts (facebookresearch/sam3).
 POST /segment accepts "model": "sam2" | "sam3" (default sam2). GET /health returns both flags.
 """
+import contextlib
 import os
 import hashlib
 from flask import Flask, request, jsonify
@@ -125,6 +126,18 @@ def _get_device():
         return torch.device("cpu")
 
 
+def _sam3_autocast(device: torch.device):
+    """
+    SAM 3 ViTDet uses fused ops that emit bfloat16; without autocast, matmul dtypes
+    mismatch (sam3#507). Official notebooks wrap inference in bf16 autocast.
+    """
+    if device.type == "cuda":
+        return torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+    if device.type == "cpu":
+        return torch.autocast(device_type="cpu", dtype=torch.bfloat16)
+    return contextlib.nullcontext()
+
+
 # ---------- SAM 2 ----------
 def _load_sam2_predictor():
     global SAM_PREDICTOR
@@ -162,8 +175,12 @@ def _load_sam3_model():
             "(set SAM3_MODELS_HOST_PATH + SAM3_CHECKPOINT_FILENAME in .env, or use install), or set SAM3_ALLOW_HF_DOWNLOAD=true to download from Hugging Face."
         )
     print("[SAM3] Loading on", device, "...")
+    if device.type == "cuda":
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
     SAM3_MODEL = _build_sam3_image_model(checkpoint_path=checkpoint_path, load_from_HF=load_from_hf)
     SAM3_MODEL.to(device)
+    SAM3_MODEL.eval()
     SAM3_PROCESSOR = _Sam3Processor(SAM3_MODEL)
     print("[SAM3] Model loaded.")
     return SAM3_MODEL, SAM3_PROCESSOR
@@ -300,31 +317,34 @@ def _segment_sam3(data):
 
     try:
         model, processor = _load_sam3_model()
+        device = next(model.parameters()).device
         global SAM3_LAST_IMAGE_HASH, SAM3_LAST_STATE
         current_hash = hashlib.sha256(img_np.tobytes()).hexdigest()
-        if current_hash != SAM3_LAST_IMAGE_HASH or SAM3_LAST_STATE is None:
-            inference_state = processor.set_image(img_rgb)
-            SAM3_LAST_IMAGE_HASH = current_hash
-            SAM3_LAST_STATE = inference_state
-        else:
-            inference_state = SAM3_LAST_STATE
 
-        masks_np = None
-        if text_prompt and isinstance(text_prompt, str) and text_prompt.strip():
-            output = processor.set_text_prompt(state=inference_state, prompt=text_prompt.strip())
-            masks_np = output.get("masks")
-        if masks_np is None or (isinstance(masks_np, (list, tuple)) and len(masks_np) == 0):
-            pts = points if points and len(points) > 0 else [point] if point else None
-            box = _points_to_box(pts, orig_w, orig_h) if pts else None
-            if box is not None:
-                try:
-                    output = processor.set_box_prompt(state=inference_state, box=box)
-                    masks_np = output.get("masks") if isinstance(output, dict) else None
-                except Exception:
-                    pass
-            if masks_np is None or (isinstance(masks_np, (list, tuple)) and len(masks_np) == 0):
-                output = processor.set_text_prompt(state=inference_state, prompt="object")
+        with torch.inference_mode(), _sam3_autocast(device):
+            if current_hash != SAM3_LAST_IMAGE_HASH or SAM3_LAST_STATE is None:
+                inference_state = processor.set_image(img_rgb)
+                SAM3_LAST_IMAGE_HASH = current_hash
+                SAM3_LAST_STATE = inference_state
+            else:
+                inference_state = SAM3_LAST_STATE
+
+            masks_np = None
+            if text_prompt and isinstance(text_prompt, str) and text_prompt.strip():
+                output = processor.set_text_prompt(state=inference_state, prompt=text_prompt.strip())
                 masks_np = output.get("masks")
+            if masks_np is None or (isinstance(masks_np, (list, tuple)) and len(masks_np) == 0):
+                pts = points if points and len(points) > 0 else [point] if point else None
+                box = _points_to_box(pts, orig_w, orig_h) if pts else None
+                if box is not None:
+                    try:
+                        output = processor.set_box_prompt(state=inference_state, box=box)
+                        masks_np = output.get("masks") if isinstance(output, dict) else None
+                    except Exception:
+                        pass
+                if masks_np is None or (isinstance(masks_np, (list, tuple)) and len(masks_np) == 0):
+                    output = processor.set_text_prompt(state=inference_state, prompt="object")
+                    masks_np = output.get("masks")
 
         if masks_np is None or (isinstance(masks_np, (list, tuple)) and len(masks_np) == 0):
             return jsonify({"error": "No mask produced"}), 500
