@@ -19,7 +19,7 @@ import { ImageDetailModal } from "@/components/ImageDetailModal";
 import { AnnotationChoiceModal } from "@/components/AnnotationChoiceModal";
 import { AddImageTabDialog } from "@/components/AddImageTabDialog";
 import { ChunkedImageCollectionUploadDialog } from "@/components/ChunkedImageCollectionUploadDialog";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { DatasetUiMode } from "@/hooks/useDatasetSettings";
 
 interface TabbedImagesContentProps {
@@ -79,6 +79,7 @@ export function TabbedImagesContent({
   const [isAnnotationChoiceModalOpen, setIsAnnotationChoiceModalOpen] = useState(false);
   const [isAddTabDialogOpen, setIsAddTabDialogOpen] = useState(false);
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
+  const gridScrollRef = useRef<HTMLDivElement>(null);
   const [uploadingTabId, setUploadingTabId] = useState<string>("");
   const [uploadingTabName, setUploadingTabName] = useState<string>("");
   const [isUploading, setIsUploading] = useState(false);
@@ -410,11 +411,12 @@ export function TabbedImagesContent({
                 {/* Images Grid */}
                 <div className="flex-1 min-h-0">
                   <div className="bg-card/20 rounded-lg border border-border/30 min-h-[400px]">
-                    <ScrollArea className="h-[calc(100vh-400px)]">
+                    <ScrollArea className="h-[calc(100vh-400px)]" viewportRef={gridScrollRef}>
                       <div className="p-4">
                         <ImagesGrid
                           images={filteredImages}
                           imageSize={imageSize}
+                          scrollElementRef={gridScrollRef}
                           onOpenUploadDialog={() => handleUploadClick(collection.id)}
                           onOpenVideoUploadDialog={
                             onOpenVideoUploadDialog

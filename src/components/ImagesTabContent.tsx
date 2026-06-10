@@ -15,7 +15,7 @@ import { PaginationControls } from "@/components/PaginationControls";
 import { AnnotationSample } from "@/utils/annotations";
 import { ImageDetailModal } from "@/components/ImageDetailModal";
 import { AnnotationChoiceModal } from "@/components/AnnotationChoiceModal";
-import { useState } from "react";
+import { useState, useRef } from "react";
 
 interface ImagesTabContentProps {
   id: string;
@@ -69,6 +69,7 @@ export function ImagesTabContent({
 }: ImagesTabContentProps & { annotationFiles?: any[] }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isAnnotationChoiceModalOpen, setIsAnnotationChoiceModalOpen] = useState(false);
+  const gridScrollRef = useRef<HTMLDivElement>(null);
 
   // Open modal at clicked image index (based on full images array)
   const handleImageClick = (image: Image) => {
@@ -200,10 +201,11 @@ export function ImagesTabContent({
 
       {/* Images Grid - scrollable content */}
       <div className="flex-1 min-h-0 mb-4">
-        <ScrollArea className="h-full">
+        <ScrollArea className="h-full" viewportRef={gridScrollRef}>
           <ImagesGrid
             images={paginatedImages}
             imageSize={imageSize}
+            scrollElementRef={gridScrollRef}
             onOpenUploadDialog={onOpenUploadDialog}
             onOpenVideoUploadDialog={onOpenVideoUploadDialog}
             onDeleteImage={onDeleteImage}

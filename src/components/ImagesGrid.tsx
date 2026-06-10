@@ -23,6 +23,8 @@ interface ImagesGridProps {
   onImageClick?: (image: Image) => void;
   annotations?: AnnotationSample[];
   annotationFiles?: any[];
+  /** When inside Radix ScrollArea, pass the viewport ref for scroll + width. */
+  scrollElementRef?: React.RefObject<HTMLElement | null>;
 }
 
 // Helper: get annotation file name for an annotation
@@ -97,6 +99,21 @@ function groupAnnotationsByClassAndFile(annotations: AnnotationSample[]): Array<
   });
 }
 
+/** Radix ScrollArea viewport uses display:table and shrinks to content width (~0 with virtual rows). */
+function findGridMeasureTarget(start: HTMLElement | null): HTMLElement | null {
+  if (!start) return null;
+  const viewport = start.closest("[data-radix-scroll-area-viewport]");
+  if (viewport?.parentElement) {
+    return viewport.parentElement as HTMLElement;
+  }
+  let node: HTMLElement | null = start.parentElement;
+  while (node) {
+    if (node.getBoundingClientRect().width > 0) return node;
+    node = node.parentElement;
+  }
+  return start;
+}
+
 export function ImagesGrid({
   images,
   imageSize,
@@ -106,6 +123,7 @@ export function ImagesGrid({
   onImageClick,
   annotations = [],
   annotationFiles = [],
+  scrollElementRef,
 }: ImagesGridProps) {
   // Only show annotations that are visible (if isVisible is defined, must be true)
   const filteredAnnotations = useMemo(
@@ -163,31 +181,24 @@ export function ImagesGrid({
   const CARD_EXTRA = 56; // filename + size row below the image thumbnail
   const scrollParentRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(0);
+  const usesExternalScroll = Boolean(scrollElementRef);
 
   useEffect(() => {
     const el = scrollParentRef.current;
     if (!el) return;
-    // Inside a Radix ScrollArea viewport (display: table), the element itself
-    // shrinks to content width (≈0 with virtualized absolute children), which
-    // would collapse the grid to a single column. Measure the nearest ancestor
-    // that has a real layout width instead.
-    const findSizedAncestor = (start: HTMLElement): HTMLElement => {
-      let node: HTMLElement | null = start.parentElement;
-      while (node) {
-        const w = node.getBoundingClientRect().width;
-        if (w > 0) return node;
-        node = node.parentElement;
-      }
-      return start;
+    const target = findGridMeasureTarget(el);
+    if (!target) return;
+
+    const updateWidth = () => {
+      const w = target.getBoundingClientRect().width;
+      if (w > 0) setContainerWidth(w);
     };
-    const target = findSizedAncestor(el);
-    const observer = new ResizeObserver(([entry]) => {
-      setContainerWidth(entry.contentRect.width);
-    });
+
+    const observer = new ResizeObserver(() => updateWidth());
     observer.observe(target);
-    setContainerWidth(target.getBoundingClientRect().width);
+    updateWidth();
     return () => observer.disconnect();
-  }, []);
+  }, [images.length, imageSize, scrollElementRef]);
 
   // Number of columns derived from container width + imageSize (mirrors CSS auto-fill)
   const columnsCount = containerWidth > 0
@@ -199,7 +210,8 @@ export function ImagesGrid({
 
   const rowVirtualizer = useVirtualizer({
     count: rowCount,
-    getScrollElement: () => scrollParentRef.current,
+    getScrollElement: () =>
+      (scrollElementRef?.current as HTMLElement | null) ?? scrollParentRef.current,
     estimateSize: () => rowHeight,
     overscan: 3,
   });
@@ -257,8 +269,8 @@ export function ImagesGrid({
   return (
     <div
       ref={scrollParentRef}
-      className="overflow-y-auto p-2"
-      style={{ height: '100%' }}
+      className={usesExternalScroll ? "p-2" : "overflow-y-auto p-2"}
+      style={usesExternalScroll ? undefined : { height: "100%" }}
     >
       {/* Total height spacer so the scrollbar reflects the full list */}
       <div
