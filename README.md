@@ -91,7 +91,7 @@ lai up
 - Starts database, API, workers, and web UI  
 - First run may take several minutes while images download  
 
-Open **`http://localhost:8089`** (or the port you chose).
+Then run **step ④** (`lai download-models`) before training or auto-annotate. You can open **`http://localhost:8089`** (or the port you chose) while weights download.
 
 ```bash
 lai down          # stop containers
@@ -101,13 +101,15 @@ lai upgrade       # after pip install -U laivision
 
 ---
 
-### ④ Download foundation models *(optional, after stack is up)*
+### ④ Download foundation models *(required — run after `lai up`)*
 
 ```bash
 lai download-models
 ```
 
-Pre-downloads training and inference weights into your data directory (`$LAI_DATA_DIR/models`):
+Downloads the weights LAI needs for training, auto-annotate, and related workflows into your data directory (`$LAI_DATA_DIR/models` and `ai_models/`). **The studio is not fully usable until this finishes** — without these files, training and auto-annotate will fail or hang waiting for models.
+
+Run it once after the stack is up (containers must be running). You can narrow what is fetched:
 
 ```bash
 lai download-models --yolo yolov8n.pt      # single Ultralytics weight
@@ -115,7 +117,7 @@ lai download-models --mmyolo minimal         # MMYOLO pretrained checkpoints
 lai download-models --depth minimal          # depth estimation ONNX
 ```
 
-Without this step, many features still work; downloads happen on first use or you can run the commands above anytime.
+Use `lai download-models --help` for the full matrix. Re-run anytime to add more weights.
 
 ---
 
