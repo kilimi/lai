@@ -1,3 +1,5 @@
+# sam3 imports pkg_resources; setuptools 82+ removed it — keep <82 in this image.
+setuptools>=69.0.0,<82
 flask
 werkzeug<3.0  # Pin to 2.x to avoid trusted host issues in Docker
 pillow

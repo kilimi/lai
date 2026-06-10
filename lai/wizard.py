@@ -22,8 +22,9 @@ PAGE_FORM = Template("""<!DOCTYPE html>
   <title>LAI setup</title>
   <style>
     :root { font-family: system-ui, sans-serif; background: #0f1419; color: #e7e9ea; }
-    body { max-width: 36rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+    body { max-width: 42rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
     h1 { font-size: 1.35rem; font-weight: 600; }
+    .lede { color: #c4cfd6; font-size: 0.95rem; margin: 0.5rem 0 1.25rem; }
     label { display: block; margin-top: 1rem; font-size: 0.85rem; color: #8b98a5; }
     input { width: 100%; box-sizing: border-box; margin-top: 0.25rem; padding: 0.5rem 0.6rem;
       border-radius: 6px; border: 1px solid #38444d; background: #15202b; color: inherit; font-size: 1rem; }
@@ -45,11 +46,32 @@ PAGE_FORM = Template("""<!DOCTYPE html>
     .license-note { font-size: 0.78rem; color: #8b98a5; margin-top: 0.6rem; line-height: 1.45; }
     .license-note a { color: #1d9bf0; text-decoration: underline; text-underline-offset: 2px; }
     .license-note a:hover { color: #4cc3ff; }
+    .section-card { margin-top: 1.25rem; padding: 1rem 1.1rem; border-radius: 10px;
+      border: 1px solid #38444d; background: #15202b; }
+    .section-card h2 { margin-top: 0; }
+    .gpu-toggle { display: flex; align-items: flex-start; gap: 0.65rem; margin-top: 0.75rem; }
+    .gpu-toggle input { width: auto; margin: 0.2rem 0 0; accent-color: #1d9bf0; flex-shrink: 0; }
+    .gpu-toggle label { margin: 0; font-size: 0.95rem; color: #e7e9ea; cursor: pointer; }
+    .gpu-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-top: 0.85rem; }
+    @media (max-width: 520px) { .gpu-grid { grid-template-columns: 1fr; } }
+    .gpu-col { padding: 0.65rem 0.75rem; border-radius: 8px; font-size: 0.84rem; line-height: 1.45; }
+    .gpu-col.needs { background: #1a2a3a; border: 1px solid #2a5070; }
+    .gpu-col.skip { background: #1a2218; border: 1px solid #2d4a2a; }
+    .gpu-col strong { display: block; font-size: 0.78rem; letter-spacing: 0.03em; text-transform: uppercase;
+      margin-bottom: 0.35rem; color: #8b98a5; }
+    .gpu-col ul { margin: 0; padding-left: 1.1rem; }
+    .gpu-col li { margin: 0.15rem 0; }
+    .callout { margin-top: 0.75rem; padding: 0.65rem 0.8rem; border-radius: 8px; font-size: 0.82rem;
+      background: #1c2430; border: 1px solid #38444d; color: #aeb9c4; }
+    .callout strong { color: #e7e9ea; }
+    .gpu-off-note { display: none; margin-top: 0.75rem; padding: 0.65rem 0.8rem; border-radius: 8px;
+      font-size: 0.84rem; background: #2a2418; border: 1px solid #5c4a20; color: #d4c4a0; }
+    .gpu-off-note.visible { display: block; }
   </style>
 </head>
 <body>
   <h1>LAI setup</h1>
-  <p>Choose where to store databases and project data, web port, and which pretrained models are baked in when you build Docker images.</p>
+  <p class="lede">Configure data storage, web port, GPU services, and optional model weights for your Docker install.</p>
   $errors_block
   <form method="post" action="/save">
     <label for="data">Data folder (absolute path on this computer)</label>
@@ -60,10 +82,37 @@ PAGE_FORM = Template("""<!DOCTYPE html>
     <input type="number" id="port" name="web_port" min="1" max="65535" value="$web_port" required/>
     <p class="hint">Then open <code>http://localhost:&lt;port&gt;</code> after <code>lai up</code>. API stays on 9999.</p>
 
-    <h2>GPU features (optional)</h2>
-    <p class="hint">Training, auto-annotate, SAM 2/3, and MMYOLO need an NVIDIA GPU and larger downloads. CPU-only installs can annotate and manage datasets.</p>
-    <div class="pt-mode">
-      <label class="row"><input type="checkbox" name="gpu_tier" value="1" id="gpu_tier" $gpu_tier_checked/> Enable GPU tier (<code>worker-gpu</code> + <code>sam_service</code>)</label>
+    <div class="section-card" id="gpu_section">
+      <h2>NVIDIA GPU</h2>
+      <p class="hint" style="margin-top:0.25rem">LAI runs most services on CPU. Enable the GPU tier to start <code>worker-gpu</code> and <code>sam_service</code> — these need an NVIDIA GPU, drivers, and the <a href="https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html" target="_blank" rel="noopener noreferrer" style="color:#1d9bf0">Container Toolkit</a> (Linux or WSL2 on Windows).</p>
+      <div class="gpu-toggle">
+        <input type="checkbox" name="gpu_tier" value="1" id="gpu_tier" $gpu_tier_checked/>
+        <label for="gpu_tier"><strong>Enable GPU tier</strong> — recommended if you have a compatible NVIDIA GPU</label>
+      </div>
+      <div class="gpu-grid">
+        <div class="gpu-col needs">
+          <strong>Requires GPU tier</strong>
+          <ul>
+            <li>YOLO / MMYOLO training</li>
+            <li>Auto-annotate (detect, segment, classify, depth)</li>
+            <li>SAM 2 / SAM 3 interactive segmentation</li>
+          </ul>
+        </div>
+        <div class="gpu-col skip">
+          <strong>Works without GPU</strong>
+          <ul>
+            <li>Web UI, datasets, and projects</li>
+            <li>Manual bbox / polygon labeling</li>
+            <li>Import, export, and dataset management</li>
+          </ul>
+        </div>
+      </div>
+      <div class="callout" id="gpu_on_note">
+        <strong>When enabled:</strong> Compose profile <code>gpu</code> pulls and runs GPU containers. Weights for training and auto-annotate can be baked below or downloaded on first use.
+      </div>
+      <div class="gpu-off-note" id="gpu_off_note">
+        CPU-only mode: the studio UI and manual annotation work. Training, auto-annotate, and SAM services will not start until you re-run setup with GPU enabled.
+      </div>
     </div>
 
     <h2>Backend code in Docker</h2>
@@ -79,10 +128,10 @@ PAGE_FORM = Template("""<!DOCTYPE html>
     </div>
 
     <h2>Pretrained models (Docker build)</h2>
-    <p class="hint">Written to <code>.env</code> as <code>LAI_PRETRAINED_MODELS</code> and <code>LAI_DEPTH_MODELS</code>. They control what is baked into the backend image on <code>docker compose build</code>. Choose <strong>None</strong> for the smallest image — weights download automatically the first time you train or run auto-annotate (network required).</p>
+    <p class="hint">Written to <code>.env</code> as <code>LAI_PRETRAINED_MODELS</code> and <code>LAI_DEPTH_MODELS</code>. They control what is baked into the backend image on <code>docker compose build</code>. Training and auto-annotate <span class="gpu-only-hint">need the GPU tier</span> to run; you can still bake weights ahead of time. Choose <strong>None</strong> for the smallest image — weights download on first use (network required).</p>
 
     <div class="section-label" style="margin-top:1rem;font-size:0.85rem;color:#8b98a5">Ultralytics — YOLO &amp; RT-DETR</div>
-    <p class="hint">Includes RT-DETR (transformer detectors) alongside YOLO11, YOLO26, and YOLO-NAS — same families as in the app.</p>
+    <p class="hint">YOLO11, YOLO26, and RT-DETR — same families as in the training UI. Used when you train or export; auto-annotate downloads its own ONNX weights separately.</p>
     <p class="license-note">
       The open-source <a href="https://github.com/ultralytics/ultralytics" target="_blank" rel="noopener noreferrer">Ultralytics</a> package is
       <a href="https://github.com/ultralytics/ultralytics/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">AGPL-3.0</a>.
@@ -99,23 +148,26 @@ PAGE_FORM = Template("""<!DOCTYPE html>
     <div id="pt_families_box" class="chk-row" style="display:none;margin-top:0.5rem">
       <label><input type="checkbox" name="pt_family" value="yolo11" checked/> YOLO11</label>
       <label><input type="checkbox" name="pt_family" value="yolo26" checked/> YOLO26</label>
-      <label><input type="checkbox" name="pt_family" value="yolo_nas" checked/> YOLO-NAS</label>
       <label><input type="checkbox" name="pt_family" value="rtdetr" checked/> RT-DETR</label>
     </div>
     <p class="hint" id="pt_families_hint" style="display:none">Each checked family includes detect / segment / classify variants and all sizes supported by that family.</p>
 
     <label for="depth_preset" style="margin-top:1rem">Depth Anything ONNX</label>
-    <p class="hint" style="margin-top:0.25rem">“None” = ONNX files are not baked into the image; they may be downloaded when you first use depth auto-annotate.</p>
+    <p class="hint" style="margin-top:0.25rem">For depth auto-annotate <span class="gpu-only-hint">(GPU tier)</span>. “None” = not baked into the image; downloaded on first use.</p>
     <select id="depth_preset" name="depth_preset">$depth_options</select>
     <div id="depth_custom_wrap" style="display:none;margin-top:0.75rem">
       <label for="depth_custom">Custom value</label>
       <input type="text" id="depth_custom" name="depth_custom" value="$depth_custom" placeholder="all, minimal, or comma-separated .onnx filenames" autocomplete="off"/>
     </div>
 
-    <label for="sam3cp">SAM 3 checkpoint file (absolute path)</label>
-    <input type="text" id="sam3cp" name="sam3_checkpoint" value="$sam3_checkpoint"
-      placeholder="/path_to_sam3_checkpoint" required autocomplete="off"/>
-    <p class="hint">$sam3_hint</p>
+    <div id="gpu_only_sam3" class="section-card" style="margin-top:1.25rem">
+      <h2>SAM 3 checkpoint</h2>
+      <p class="hint" style="margin-top:0.25rem">Only used when the GPU tier is enabled (<code>sam_service</code>). SAM 2 works without a local SAM 3 file.</p>
+      <label for="sam3cp">Checkpoint file (absolute path)</label>
+      <input type="text" id="sam3cp" name="sam3_checkpoint" value="$sam3_checkpoint"
+        placeholder="/path_to_sam3_checkpoint" autocomplete="off"/>
+      <p class="hint">$sam3_hint</p>
+    </div>
 
     <button type="submit" $submit_disabled>Save and finish</button>
   </form>
@@ -142,9 +194,23 @@ PAGE_FORM = Template("""<!DOCTYPE html>
     }
     document.getElementById("bind_yes").addEventListener("change", syncBind);
     document.getElementById("bind_no").addEventListener("change", syncBind);
+    function syncGpu() {
+      var gpu = document.getElementById("gpu_tier").checked;
+      var samWrap = document.getElementById("gpu_only_sam3");
+      var samInput = document.getElementById("sam3cp");
+      samWrap.style.display = gpu ? "block" : "none";
+      samInput.required = gpu;
+      document.getElementById("gpu_on_note").style.display = gpu ? "block" : "none";
+      document.getElementById("gpu_off_note").classList.toggle("visible", !gpu);
+      document.querySelectorAll(".gpu-only-hint").forEach(function (el) {
+        el.style.display = gpu ? "inline" : "none";
+      });
+    }
+    document.getElementById("gpu_tier").addEventListener("change", syncGpu);
     syncPt();
     syncDepth();
     syncBind();
+    syncGpu();
   })();
   </script>
   <p class="hint">Served only on <code>127.0.0.1</code>. Press <strong>Ctrl+C</strong> in the terminal to stop.</p>
@@ -324,7 +390,7 @@ def _resolve_env_preset(preset: str, custom: str) -> str:
 
 
 # Order matches backend foundation_models / install arch tokens
-_PT_FAMILY_ORDER = ("yolo11", "yolo26", "yolo_nas", "rtdetr")
+_PT_FAMILY_ORDER = ("yolo11", "yolo26", "rtdetr")
 
 
 def _resolve_pretrained_from_form(data: dict[str, list[str]]) -> str:
@@ -423,11 +489,16 @@ def run_wizard(bundle_root: Path, *, open_browser: bool = True) -> int:
                 bind_host_backend = bind_raw not in ("0", "false", "False", "no", "NO")
                 gpu_tier = bool((data.get("gpu_tier") or [""])[0].strip())
                 repo_in = (data.get("repo_root") or [""])[0].strip()
-                if not data_dir or not web_port or not sam3_checkpoint:
+                if not data_dir or not web_port:
                     self.send_response(400)
                     self.end_headers()
                     return
-                if sam3_checkpoint == SAM3_CHECKPOINT_PLACEHOLDER:
+                if gpu_tier and not sam3_checkpoint:
+                    self.send_response(400)
+                    self.end_headers()
+                    self.wfile.write(b"SAM 3 checkpoint path is required when GPU tier is enabled.")
+                    return
+                if gpu_tier and sam3_checkpoint == SAM3_CHECKPOINT_PLACEHOLDER:
                     self.send_response(400)
                     self.end_headers()
                     self.wfile.write(
@@ -441,13 +512,16 @@ def run_wizard(bundle_root: Path, *, open_browser: bool = True) -> int:
                     self.end_headers()
                     self.wfile.write(b"Data folder must be an absolute path.")
                     return
-                s3 = Path(sam3_checkpoint).expanduser()
-                if not s3.is_absolute():
-                    self.send_response(400)
-                    self.end_headers()
-                    self.wfile.write(b"SAM 3 checkpoint must be an absolute path.")
-                    return
-                sam3_dir, sam3_file = _parse_sam3_checkpoint(sam3_checkpoint)
+                if gpu_tier:
+                    s3 = Path(sam3_checkpoint).expanduser()
+                    if not s3.is_absolute():
+                        self.send_response(400)
+                        self.end_headers()
+                        self.wfile.write(b"SAM 3 checkpoint must be an absolute path.")
+                        return
+                    sam3_dir, sam3_file = _parse_sam3_checkpoint(sam3_checkpoint)
+                else:
+                    sam3_dir, sam3_file = _parse_sam3_checkpoint(default_sam3_checkpoint)
                 try:
                     pi = int(web_port)
                     if not (1 <= pi <= 65535):

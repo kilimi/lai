@@ -1,4 +1,8 @@
 # Repository-root entrypoint for Docker Compose (see dockers/).
 # Requires Docker Compose v2.24+ (include).
+#
+# Project name → container names like lai-backend-1 (not bundle-* on PyPI installs).
+name: lai
+
 include:
   - path: dockers/docker-compose.yml

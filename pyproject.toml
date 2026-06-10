@@ -5,11 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "laivision"
 version = "0.1.0"
-description = "CLI to install and run the LAI annotation stack via Docker Compose."
+description = "LAI: a platform to train and deploy AI vision models — datasets, annotation, training, and evaluation."
 readme = "README.md"
 requires-python = ">=3.10"
-authors = [{ name = "LAI maintainers" }]
+authors = [{ name = "Lilita Kiforenko", email = "lki@mmmi.sdu.dk" }]
 license = "AGPL-3.0-only"
+# No Python runtime deps — the CLI shells out to Docker Compose (system requirement; see README).
+dependencies = []
 license-files = ["LICENSE"]
 keywords = ["annotation", "docker", "segmentation", "dataset"]
 classifiers = [
@@ -30,8 +32,8 @@ lai = "lai.cli:main"
 [project.urls]
 Homepage = "https://laivision.dk"
 Documentation = "https://github.com/kilimi/lai/blob/main/README.md"
-Repository = "https://github.com/lulu/lai"
-Issues = "https://github.com/lulu/lai/issues"
+Repository = "https://github.com/kilimi/lai"
+Issues = "https://github.com/kilimi/lai/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]

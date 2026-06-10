@@ -16,9 +16,10 @@ ENV HUGGINGFACE_HUB_DISABLE_TELEMETRY=1
 
 # SAM-2's pyproject often fails inside pip's isolated build env (missing/wrong torch).
 # Install wheels first, then git deps with --no-build-isolation so setup.py sees image PyTorch.
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel packaging \
+RUN pip install --no-cache-dir --upgrade pip 'setuptools>=69,<82' wheel packaging \
     && pip install --no-cache-dir -r requirements.txt \
-    && pip install --no-cache-dir --no-build-isolation -r requirements-git.txt
+    && pip install --no-cache-dir --no-build-isolation -r requirements-git.txt \
+    && pip install --no-cache-dir 'setuptools>=69,<82'
 
 # SAM 2: pre-download checkpoint at build. SAM 3: use runtime volume or HF (SAM3_CHECKPOINT_PATH / HF_TOKEN).
 RUN mkdir -p /models/hf_cache /models/sam3 \

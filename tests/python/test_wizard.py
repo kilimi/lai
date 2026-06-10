@@ -7,6 +7,7 @@ from lai.wizard import (
     SAM3_CHECKPOINT_PLACEHOLDER,
     _default_sam3_checkpoint,
     _parse_sam3_checkpoint,
+    _resolve_pretrained_from_form,
 )
 
 
@@ -38,3 +39,23 @@ def test_default_sam3_checkpoint_dev_uses_repo_models(tmp_path: Path):
 
 def test_sam3_placeholder_constant():
     assert SAM3_CHECKPOINT_PLACEHOLDER == "/path_to_sam3_checkpoint"
+
+
+def test_resolve_pretrained_families_excludes_yolo_nas():
+    got = _resolve_pretrained_from_form(
+        {
+            "pt_mode": ["families"],
+            "pt_family": ["yolo11", "yolo_nas", "rtdetr"],
+        }
+    )
+    assert got == "yolo11,rtdetr"
+
+
+def test_resolve_pretrained_families_order():
+    got = _resolve_pretrained_from_form(
+        {
+            "pt_mode": ["families"],
+            "pt_family": ["rtdetr", "yolo26", "yolo11"],
+        }
+    )
+    assert got == "yolo11,yolo26,rtdetr"

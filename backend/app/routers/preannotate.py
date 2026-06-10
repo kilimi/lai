@@ -266,6 +266,10 @@ def process_single_image(db, runner, img, project_id: int, dataset_id: int,
         logger.error(f"Inference failed on {img_path}: {e}", exc_info=True)
         return 0
 
+    if img.width != img_width or img.height != img_height:
+        img.width = img_width
+        img.height = img_height
+
     logger.info(f"Image {img.file_name}: shape=({img_height}, {img_width}), detections={len(detections)}")
     for i, det in enumerate(detections[:5]):
         cls_name = COCO_CLASSES[det.class_id] if det.class_id < len(COCO_CLASSES) else f"unknown_{det.class_id}"

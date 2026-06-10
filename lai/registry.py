@@ -309,6 +309,7 @@ def write_registry_env(
     if _registry_host() == "docker.io":
         _upsert_env_line(env_file, "LAI_DOCKERHUB_USER", org)
     _upsert_env_line(env_file, "LAI_RELEASE_VERSION", ver.lstrip("v"))
+    _upsert_env_line(env_file, "COMPOSE_PROJECT_NAME", "lai")
     _upsert_env_line(env_file, "LAI_GPU_TIER", "1" if gpu_tier else "0")
     if gpu_tier:
         _upsert_env_line(env_file, "COMPOSE_PROFILES", "gpu")

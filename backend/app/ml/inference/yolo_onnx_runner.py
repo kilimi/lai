@@ -85,16 +85,36 @@ def _nms_xyxy(
     return orig_idx[flat]
 
 
+def _unmap_mask_from_letterbox(
+    mask: np.ndarray,
+    orig_shape: Tuple[int, int],
+    resized_size: Tuple[int, int],
+    letterbox_size: Tuple[int, int],
+) -> np.ndarray:
+    """Map YOLO proto/letterbox mask logits to original image resolution."""
+    oh, ow = orig_shape
+    rw, rh = resized_size
+    lh, lw = letterbox_size
+
+    if mask.shape[0] != lh or mask.shape[1] != lw:
+        mask_lb = cv2.resize(mask, (lw, lh), interpolation=cv2.INTER_LINEAR)
+    else:
+        mask_lb = mask
+
+    mask_crop = mask_lb[:rh, :rw]
+    if mask_crop.size == 0:
+        return np.zeros((oh, ow), dtype=np.float32)
+
+    return cv2.resize(mask_crop, (ow, oh), interpolation=cv2.INTER_LINEAR)
+
+
 def _mask_to_polygon(
     mask: np.ndarray,
     orig_shape: Tuple[int, int],
-    scale: float,
     resized_size: Tuple[int, int],
+    letterbox_size: Tuple[int, int],
 ) -> Optional[List[float]]:
-    rw, rh = resized_size
-    if mask.shape[0] != orig_shape[0] or mask.shape[1] != orig_shape[1]:
-        cropped = mask[:rh, :rw] if mask.shape[0] >= rh and mask.shape[1] >= rw else mask
-        mask = cv2.resize(cropped, (orig_shape[1], orig_shape[0]), interpolation=cv2.INTER_LINEAR)
+    mask = _unmap_mask_from_letterbox(mask, orig_shape, resized_size, letterbox_size)
     if np.max(mask) < 0:
         mask = 1.0 / (1.0 + np.exp(-mask))
     binary = (mask > 0.5).astype(np.uint8) * 255
@@ -241,7 +261,12 @@ class YoloOnnxRunner:
                 mask = np.tensordot(coeffs, prototypes, axes=(0, 0))
                 if np.max(mask) < 0:
                     mask = 1.0 / (1.0 + np.exp(-mask))
-                seg = _mask_to_polygon(mask, orig_shape, scale, resized_size)
+                seg = _mask_to_polygon(
+                    mask,
+                    orig_shape,
+                    resized_size,
+                    (self.imgsz, self.imgsz),
+                )
             bx1, by1, bx2, by2 = boxes_xyxy[idx]
             detections.append(
                 YoloDetection(
