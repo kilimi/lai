@@ -22,7 +22,8 @@ import {
   Play,
   Info,
   Copy,
-  Check
+  Check,
+  RotateCcw,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useState, useEffect } from "react";
@@ -40,6 +41,7 @@ import { DatabaseManager } from "@/components/DatabaseManager";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
+import { Checkbox } from "@/components/ui/checkbox";
 
 export const ApiSettings = () => {
   const { toast } = useToast();
@@ -64,6 +66,13 @@ export const ApiSettings = () => {
   const [isSavingBackupSettings, setIsSavingBackupSettings] = useState(false);
   const [isRunningBackup, setIsRunningBackup] = useState(false);
   const [backups, setBackups] = useState<any[]>([]);
+  const [showRestoreDialog, setShowRestoreDialog] = useState(false);
+  const [restoreTarget, setRestoreTarget] = useState<any | null>(null);
+  const [restoreConfirmText, setRestoreConfirmText] = useState("");
+  const [restoreDatabase, setRestoreDatabase] = useState(true);
+  const [restoreFiles, setRestoreFiles] = useState(true);
+  const [restoreAcknowledged, setRestoreAcknowledged] = useState(false);
+  const [isRestoring, setIsRestoring] = useState(false);
 
   useEffect(() => {
     checkConnection();
@@ -234,6 +243,64 @@ export const ApiSettings = () => {
       });
     } finally {
       setIsRunningBackup(false);
+    }
+  };
+
+  const openRestoreDialog = (backup: any) => {
+    setRestoreTarget(backup);
+    setRestoreConfirmText("");
+    setRestoreDatabase(true);
+    setRestoreFiles(true);
+    setRestoreAcknowledged(false);
+    setShowRestoreDialog(true);
+  };
+
+  const handleRestore = async () => {
+    if (!restoreTarget?.record_id) return;
+    if (restoreConfirmText !== "RESTORE" || !restoreAcknowledged) return;
+    if (!restoreDatabase && !restoreFiles) {
+      toast({
+        title: "Select restore options",
+        description: "Choose at least database or project files to restore.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsRestoring(true);
+    try {
+      const apiClient = new ApiClient({ ...API_CONFIG, baseUrl: apiUrl });
+      const response = await apiClient.request<any>(
+        `/backup/${restoreTarget.record_id}/restore`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            restore_database: restoreDatabase,
+            restore_files: restoreFiles,
+            confirm: "RESTORE",
+          }),
+        }
+      );
+
+      if (response.success) {
+        setShowRestoreDialog(false);
+        toast({
+          title: "Restore started",
+          description:
+            "Restore is running in the background. Stop training jobs and verify data when complete.",
+        });
+        setTimeout(() => loadBackups(), 3000);
+      } else {
+        throw new Error(response.error || "Failed to start restore");
+      }
+    } catch (error) {
+      toast({
+        title: "Restore failed",
+        description: error instanceof Error ? error.message : "Failed to start restore",
+        variant: "destructive",
+      });
+    } finally {
+      setIsRestoring(false);
     }
   };
 
@@ -786,7 +853,7 @@ export const ApiSettings = () => {
                     <div className="flex gap-3">
                       <Button
                         onClick={saveBackupSettings}
-                        disabled={isSavingBackupSettings || isLoadingBackupSettings || !backupPath}
+                        disabled={isSavingBackupSettings || isLoadingBackupSettings}
                         className="flex-1"
                       >
                         <Save className="h-4 w-4 mr-2" />
@@ -794,7 +861,7 @@ export const ApiSettings = () => {
                       </Button>
                       <Button
                         onClick={runBackup}
-                        disabled={isRunningBackup || !backupEnabled || !backupPath}
+                        disabled={isRunningBackup || !backupEnabled}
                         variant="outline"
                         className="flex-1"
                       >
@@ -824,29 +891,38 @@ export const ApiSettings = () => {
                                   {backup.actual_size_bytes && ` • ${(backup.actual_size_bytes / 1024 / 1024).toFixed(2)} MB`}
                                 </p>
                                 <div className="flex items-center gap-3 mt-2 text-xs">
-                                  <span className={`flex items-center gap-1 ${backup.status === 'completed' ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'}`}>
-                                    {backup.status === 'completed' ? (
+                                  <span className={`flex items-center gap-1 ${backup.status === 'completed' ? 'text-emerald-600 dark:text-emerald-400' : backup.status === 'partial' ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}`}>
+                                    {backup.status === 'completed' || backup.status === 'partial' ? (
                                       <CheckCircle2 className="h-3 w-3" />
                                     ) : (
                                       <XCircle className="h-3 w-3" />
                                     )}
                                     {backup.status || 'unknown'}
                                   </span>
-                                  {backup.backup_metadata && (
-                                    <>
-                                      {backup.backup_metadata.files_backed_up !== false && (
-                                        <span className="text-muted-foreground">Files ✓</span>
-                                      )}
-                                      {backup.backup_metadata.database_backed_up !== false && (
-                                        <span className="text-muted-foreground">Database ✓</span>
-                                      )}
-                                    </>
+                                  {backup.files_backed_up !== false && (
+                                    <span className="text-muted-foreground">Files ✓</span>
+                                  )}
+                                  {backup.database_backed_up !== false && (
+                                    <span className="text-muted-foreground">Database ✓</span>
                                   )}
                                 </div>
                               </div>
-                              <Badge variant={backup.status === 'completed' ? 'default' : 'secondary'}>
-                                {backup.status || 'unknown'}
-                              </Badge>
+                              <div className="flex flex-col items-end gap-2">
+                                <Badge variant={backup.status === 'completed' ? 'default' : backup.status === 'partial' ? 'secondary' : 'outline'}>
+                                  {backup.status || 'unknown'}
+                                </Badge>
+                                {(backup.status === 'completed' || backup.status === 'partial') && backup.record_id && (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-8 text-xs border-red-500/30 text-red-600 hover:text-red-700 hover:bg-red-500/10"
+                                    onClick={() => openRestoreDialog(backup)}
+                                  >
+                                    <RotateCcw className="h-3 w-3 mr-1" />
+                                    Restore
+                                  </Button>
+                                )}
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -915,6 +991,107 @@ export const ApiSettings = () => {
           </TabsContent>
         </Tabs>
       </main>
+
+      {/* Restore Backup Dialog */}
+      <Dialog open={showRestoreDialog} onOpenChange={setShowRestoreDialog}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <AlertTriangle className="h-5 w-5" />
+              Restore from backup
+            </DialogTitle>
+            <DialogDescription>
+              This will overwrite your current database and/or project files. Stop training jobs before restoring.
+            </DialogDescription>
+          </DialogHeader>
+          {restoreTarget && (
+            <div className="space-y-4">
+              <div className="p-3 rounded-lg bg-muted/50 text-sm">
+                <p className="font-medium">
+                  {restoreTarget.backup_name || restoreTarget.backup_path?.split("/").pop()}
+                </p>
+                {restoreTarget.created_at && (
+                  <p className="text-muted-foreground text-xs mt-1">
+                    {new Date(restoreTarget.created_at).toLocaleString()}
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="restore-db"
+                    checked={restoreDatabase}
+                    onCheckedChange={(v) => setRestoreDatabase(v === true)}
+                  />
+                  <Label htmlFor="restore-db" className="cursor-pointer">
+                    Restore database (PostgreSQL)
+                  </Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="restore-files"
+                    checked={restoreFiles}
+                    onCheckedChange={(v) => setRestoreFiles(v === true)}
+                  />
+                  <Label htmlFor="restore-files" className="cursor-pointer">
+                    Restore project files (/app/projects)
+                  </Label>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-2">
+                <Checkbox
+                  id="restore-ack"
+                  checked={restoreAcknowledged}
+                  onCheckedChange={(v) => setRestoreAcknowledged(v === true)}
+                />
+                <Label htmlFor="restore-ack" className="text-sm cursor-pointer leading-snug">
+                  I understand this will overwrite current data. Previous project files are renamed to{" "}
+                  <code className="text-xs bg-muted px-1 rounded">projects.pre_restore_*</code>.
+                </Label>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="restore-confirm" className="text-sm">
+                  Type <strong>RESTORE</strong> to confirm
+                </Label>
+                <Input
+                  id="restore-confirm"
+                  value={restoreConfirmText}
+                  onChange={(e) => setRestoreConfirmText(e.target.value)}
+                  placeholder="RESTORE"
+                  className="font-mono"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => setShowRestoreDialog(false)}
+                  disabled={isRestoring}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="destructive"
+                  className="flex-1"
+                  onClick={handleRestore}
+                  disabled={
+                    isRestoring ||
+                    restoreConfirmText !== "RESTORE" ||
+                    !restoreAcknowledged ||
+                    (!restoreDatabase && !restoreFiles)
+                  }
+                >
+                  {isRestoring ? "Restoring..." : "Restore backup"}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Datasets Dialog */}
       <Dialog open={showDatasetsDialog} onOpenChange={setShowDatasetsDialog}>

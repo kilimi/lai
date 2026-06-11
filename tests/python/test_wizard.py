@@ -34,7 +34,7 @@ def test_default_sam3_checkpoint_pypi_uses_lai_data(monkeypatch, tmp_path: Path)
 def test_default_sam3_checkpoint_dev_uses_repo_models(tmp_path: Path):
     (tmp_path / "backend" / "sam_service" / "models").mkdir(parents=True)
     got = _default_sam3_checkpoint(tmp_path, dev_checkout=True)
-    assert got.endswith("/backend/sam_service/models/sam3.pt")
+    assert Path(got).as_posix().endswith("backend/sam_service/models/sam3.pt")
 
 
 def test_sam3_placeholder_constant():

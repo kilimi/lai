@@ -49,16 +49,18 @@ def test_enqueue_training_task_uses_mmyolo_queue():
     task.apply_async.assert_called_once_with(args=[7, {"epochs": 1}], queue=MMYOLO_QUEUE)
 
 
-@patch("app.celery.gpu_app.celery_app")
-def test_send_gpu_task_uses_gpu_app(mock_gpu_app):
-    mock_gpu_app.send_task.return_value = MagicMock(id="x")
-    send_gpu_task("app.tasks.export_tasks.export_yolo_model", args=[1, {}], queue=GPU_QUEUE)
-    mock_gpu_app.send_task.assert_called_once_with(
-        "app.tasks.export_tasks.export_yolo_model",
-        args=[1, {}],
-        kwargs={},
-        queue=GPU_QUEUE,
-    )
+def test_send_gpu_task_uses_gpu_app():
+    from app.celery import gpu_app
+
+    with patch.object(gpu_app, "send_task") as mock_send_task:
+        mock_send_task.return_value = MagicMock(id="x")
+        send_gpu_task("app.tasks.export_tasks.export_yolo_model", args=[1, {}], queue=GPU_QUEUE)
+        mock_send_task.assert_called_once_with(
+            "app.tasks.export_tasks.export_yolo_model",
+            args=[1, {}],
+            kwargs={},
+            queue=GPU_QUEUE,
+        )
 
 
 def test_backend_runtime_profiles_map_to_worker_queues():

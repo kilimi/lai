@@ -32,7 +32,7 @@ def geo_to_pixel_coords(transform, x, y, width, height, rotation_degrees=0):
     
     return px, py
 
-def test_rotations(image_path, transform_path, shapefile_path, output_dir, target_crs="EPSG:32635"):
+def run_rotation_angle_demo(image_path, transform_path, shapefile_path, output_dir, target_crs="EPSG:32635"):
     # Load shapefile
     gdf = gpd.read_file(shapefile_path)
     print(f"Shapefile CRS: {gdf.crs}")
@@ -129,4 +129,4 @@ if __name__ == "__main__":
     parser.add_argument("--crs", default="EPSG:32635", help="Target CRS")
     
     args = parser.parse_args()
-    test_rotations(args.image, args.transform, args.shapefile, args.output, args.crs)
+    run_rotation_angle_demo(args.image, args.transform, args.shapefile, args.output, args.crs)

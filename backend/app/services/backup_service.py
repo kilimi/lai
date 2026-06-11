@@ -11,9 +11,47 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 import json
 import logging
-from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
+
+
+def parse_postgres_url(db_url: str) -> Optional[Dict[str, str]]:
+    """Parse postgresql:// URL into connection components."""
+    if not db_url.startswith("postgresql://"):
+        return None
+
+    db_url_clean = db_url.replace("postgresql://", "")
+    if "@" in db_url_clean:
+        auth, host_db = db_url_clean.split("@", 1)
+        if ":" in auth:
+            user, password = auth.split(":", 1)
+        else:
+            user = auth
+            password = None
+    else:
+        user = "postgres"
+        password = None
+        host_db = db_url_clean
+
+    if "/" in host_db:
+        host_port, database = host_db.split("/", 1)
+    else:
+        host_port = host_db
+        database = None
+
+    if ":" in host_port:
+        host, port = host_port.split(":")
+    else:
+        host = host_port
+        port = "5432"
+
+    return {
+        "user": user,
+        "password": password or "",
+        "host": host,
+        "port": port,
+        "database": database or "",
+    }
 
 
 class BackupService:
@@ -182,36 +220,16 @@ class BackupService:
         Returns True if successful.
         """
         try:
-            # Parse database URL
-            # Format: postgresql://user:password@host:port/database
-            if not db_url.startswith('postgresql://'):
+            conn = parse_postgres_url(db_url)
+            if not conn:
                 logger.error(f"Unsupported database type: {db_url}")
                 return False
-            
-            # Extract connection details
-            db_url_clean = db_url.replace('postgresql://', '')
-            if '@' in db_url_clean:
-                auth, host_db = db_url_clean.split('@', 1)
-                if ':' in auth:
-                    user, password = auth.split(':', 1)
-                else:
-                    user = auth
-                    password = None
-            else:
-                user = 'postgres'
-                host_db = db_url_clean
-            
-            if '/' in host_db:
-                host_port, database = host_db.split('/', 1)
-            else:
-                host_port = host_db
-                database = None
-            
-            if ':' in host_port:
-                host, port = host_port.split(':')
-            else:
-                host = host_port
-                port = '5432'
+
+            user = conn["user"]
+            password = conn["password"] or None
+            host = conn["host"]
+            port = conn["port"]
+            database = conn["database"] or None
             
             # Create database backup directory
             db_backup_dir = Path(backup_path) / 'database'
@@ -338,3 +356,170 @@ class BackupService:
                 backups.append(info)
         
         return backups
+
+    def find_database_dump(self, backup_dir: Path) -> Optional[Path]:
+        """Find the latest pg_dump file in a snapshot."""
+        db_dir = backup_dir / "database"
+        if not db_dir.is_dir():
+            return None
+        dumps = sorted(db_dir.glob("*.dump"), reverse=True)
+        for dump in dumps:
+            if dump.is_file() and dump.stat().st_size > 0:
+                return dump
+        return None
+
+    def _projects_source_in_snapshot(self, backup_dir: Path) -> Optional[Path]:
+        """Locate project files inside a snapshot directory."""
+        projects_sub = backup_dir / "projects"
+        if projects_sub.is_dir() and any(projects_sub.iterdir()):
+            return projects_sub
+
+        skip_names = {"database", ".backup_manifest.json", ".backup_metadata.json"}
+        has_files = False
+        for child in backup_dir.iterdir():
+            if child.name.startswith(".") or child.name in skip_names:
+                continue
+            has_files = True
+            break
+        if has_files:
+            return backup_dir
+        return None
+
+    def validate_snapshot(self, backup_dir: Path) -> Dict:
+        """Return readiness flags for restoring a snapshot."""
+        backup_dir = Path(backup_dir)
+        dump = self.find_database_dump(backup_dir)
+        projects_src = self._projects_source_in_snapshot(backup_dir)
+        manifest_ok = (backup_dir / ".backup_manifest.json").exists()
+
+        return {
+            "backup_path": str(backup_dir),
+            "has_database_dump": dump is not None,
+            "has_project_files": projects_src is not None,
+            "has_manifest": manifest_ok,
+            "can_restore_database": dump is not None,
+            "can_restore_files": projects_src is not None,
+            "database_dump_path": str(dump) if dump else None,
+            "projects_source_path": str(projects_src) if projects_src else None,
+        }
+
+    def restore_database(self, backup_dir: Path, db_url: str) -> Tuple[bool, Optional[str]]:
+        """Restore PostgreSQL from pg_dump custom format. Returns (success, error)."""
+        dump_file = self.find_database_dump(Path(backup_dir))
+        if not dump_file:
+            return False, "No database dump found in snapshot"
+
+        conn = parse_postgres_url(db_url)
+        if not conn:
+            return False, "Unsupported database URL"
+
+        cmd = [
+            "pg_restore",
+            "--clean",
+            "--if-exists",
+            "--no-owner",
+            "--no-acl",
+            "-h",
+            conn["host"],
+            "-p",
+            conn["port"],
+            "-U",
+            conn["user"],
+            "-d",
+            conn["database"],
+            str(dump_file),
+        ]
+
+        env = os.environ.copy()
+        if conn["password"]:
+            env["PGPASSWORD"] = conn["password"]
+
+        logger.info(f"Restoring database from {dump_file}")
+        try:
+            result = subprocess.run(
+                cmd,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=3600,
+            )
+            stderr = result.stderr or ""
+            if result.returncode != 0 and "error" in stderr.lower():
+                logger.error(f"pg_restore failed: {stderr}")
+                return False, stderr.strip() or f"pg_restore exit code {result.returncode}"
+            if result.returncode != 0:
+                logger.warning(f"pg_restore warnings (exit {result.returncode}): {stderr}")
+            logger.info("Database restore completed")
+            return True, None
+        except subprocess.TimeoutExpired:
+            return False, "Database restore timed out"
+        except Exception as e:
+            logger.error(f"Database restore failed: {e}")
+            return False, str(e)
+
+    def restore_projects(
+        self, backup_dir: Path, target_dir: Path
+    ) -> Tuple[bool, Optional[str], Optional[str]]:
+        """
+        Restore project files from snapshot.
+        Returns (success, rollback_path, error).
+        """
+        backup_dir = Path(backup_dir)
+        target_dir = Path(target_dir)
+        source = self._projects_source_in_snapshot(backup_dir)
+        if not source:
+            return False, None, "No project files found in snapshot"
+
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        rollback_path = None
+
+        try:
+            if target_dir.exists() and any(target_dir.iterdir()):
+                rollback_path = str(
+                    target_dir.parent / f"{target_dir.name}.pre_restore_{timestamp}"
+                )
+                logger.info(f"Renaming current projects to {rollback_path}")
+                target_dir.rename(rollback_path)
+
+            target_dir.mkdir(parents=True, exist_ok=True)
+
+            skip_names = {"database", ".backup_manifest.json", ".backup_metadata.json"}
+
+            def should_copy(rel: Path) -> bool:
+                parts = rel.parts
+                if not parts:
+                    return False
+                if parts[0] in skip_names or parts[0].startswith("."):
+                    return False
+                return True
+
+            if source == backup_dir:
+                for item in source.iterdir():
+                    if item.name in skip_names or item.name.startswith("."):
+                        continue
+                    dest = target_dir / item.name
+                    if item.is_dir():
+                        shutil.copytree(item, dest, dirs_exist_ok=True)
+                    else:
+                        shutil.copy2(item, dest)
+            else:
+                for root, dirs, files in os.walk(source):
+                    dirs[:] = [d for d in dirs if not d.startswith(".")]
+                    root_path = Path(root)
+                    for filename in files:
+                        if filename.startswith("."):
+                            continue
+                        src_file = root_path / filename
+                        rel = src_file.relative_to(source)
+                        if not should_copy(rel):
+                            continue
+                        dest_file = target_dir / rel
+                        dest_file.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(src_file, dest_file)
+
+            logger.info(f"Project files restored to {target_dir}")
+            return True, rollback_path, None
+
+        except Exception as e:
+            logger.error(f"Project restore failed: {e}", exc_info=True)
+            return False, rollback_path, str(e)

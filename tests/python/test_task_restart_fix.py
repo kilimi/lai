@@ -100,19 +100,19 @@ def test_sync_tasks_with_database_revokes_stopped_tasks():
     db.add_all([stopped_task, cancelled_task, paused_task, running_task])
     db.commit()
     
-    # Mock Celery app methods
-    mock_control = MagicMock()
-    mock_backend = MagicMock()
-    
-    with patch.object(celery_app, 'control', mock_control):
-        with patch.object(celery_app, 'backend', mock_backend):
-            with patch('app.celery_app.SessionLocal', return_value=db):
-                # Import and run the sync function
-                from app.celery_app import sync_tasks_with_database
-                sync_tasks_with_database()
-    
+    with patch.object(celery_app.control, "revoke", MagicMock()) as mock_revoke, patch.object(
+        celery_app.backend, "delete", MagicMock()
+    ) as mock_delete, patch(
+        "sqlalchemy.create_engine", return_value=engine
+    ), patch("sqlalchemy.orm.sessionmaker", return_value=TestSessionLocal), patch(
+        "app.celery.worker_hooks.time.sleep"
+    ):
+        from app.celery_app import sync_tasks_with_database
+
+        sync_tasks_with_database()
+
     # Verify revoke was called for stopped, cancelled, and paused tasks only
-    revoke_calls = mock_control.revoke.call_args_list
+    revoke_calls = mock_revoke.call_args_list
     assert len(revoke_calls) == 3, f"Expected 3 revoke calls, got {len(revoke_calls)}"
     
     # Check that the correct task IDs were revoked
@@ -132,7 +132,7 @@ def test_sync_tasks_with_database_revokes_stopped_tasks():
         assert kwargs.get('signal') == 'SIGKILL', "revoke should have signal=SIGKILL"
     
     # Verify backend.delete was called for each task
-    delete_calls = mock_backend.delete.call_args_list
+    delete_calls = mock_delete.call_args_list
     assert len(delete_calls) == 3, f"Expected 3 delete calls, got {len(delete_calls)}"
     
     deleted_task_ids = {call[0][0] for call in delete_calls}
@@ -177,37 +177,26 @@ def test_cancel_endpoint_purges_result_backend():
     db.add(running_task)
     db.commit()
     
-    # Mock Celery app methods
-    mock_control = MagicMock()
-    mock_backend = MagicMock()
-    
-    with patch.object(celery_app, 'control', mock_control):
-        with patch.object(celery_app, 'backend', mock_backend):
-            # Simulate the cancel endpoint logic for running task
-            celery_task_id = running_task.task_metadata.get('celery_task_id')
-            
-            # This is what cancel_task endpoint does
-            celery_app.control.revoke(
-                celery_task_id,
-                terminate=True,
-                signal='SIGTERM'
-            )
-            # Key: also delete from result backend
-            try:
-                celery_app.backend.delete(celery_task_id)
-            except Exception as e:
-                print(f"Warning: Failed to delete from backend: {e}")
-    
-    # Verify both revoke and delete were called
-    assert mock_control.revoke.called, "revoke should have been called"
-    mock_control.revoke.assert_called_once_with(
+    with patch.object(celery_app.control, "revoke", MagicMock()) as mock_revoke, patch.object(
+        celery_app.backend, "delete", MagicMock()
+    ) as mock_delete:
+        celery_task_id = running_task.task_metadata.get("celery_task_id")
+        celery_app.control.revoke(
+            celery_task_id,
+            terminate=True,
+            signal="SIGTERM",
+        )
+        celery_app.backend.delete(celery_task_id)
+
+    assert mock_revoke.called, "revoke should have been called"
+    mock_revoke.assert_called_once_with(
         "celery-running-to-cancel-555",
         terminate=True,
-        signal='SIGTERM'
+        signal="SIGTERM",
     )
-    
-    assert mock_backend.delete.called, "backend.delete should have been called"
-    mock_backend.delete.assert_called_once_with("celery-running-to-cancel-555")
+
+    assert mock_delete.called, "backend.delete should have been called"
+    mock_delete.assert_called_once_with("celery-running-to-cancel-555")
     
     print("✓ Cancel endpoint purges result backend: PASSED")
     return True
@@ -256,21 +245,19 @@ def test_stopped_task_not_restarted_after_container_restart():
     assert task_before.status == "stopped", "Task should be stopped before restart"
     assert task_before.completed_at is not None, "Stopped task should have completed_at set"
     
-    # Mock Celery control/backend
-    mock_control = MagicMock()
-    mock_backend = MagicMock()
-    
-    with patch.object(celery_app, 'control', mock_control):
-        with patch.object(celery_app, 'backend', mock_backend):
-            with patch('app.celery_app.SessionLocal', return_value=db):
-                # Simulate container restart - worker_process_init fires
-                from app.celery_app import sync_tasks_with_database
-                sync_tasks_with_database()
-    
-    # After sync, the celery task should have been revoked and deleted
-    # This prevents Celery from auto-requeuing it
-    assert mock_control.revoke.called, "revoke should be called during restart sync"
-    assert mock_backend.delete.called, "backend.delete should be called during restart sync"
+    with patch.object(celery_app.control, "revoke", MagicMock()) as mock_revoke, patch.object(
+        celery_app.backend, "delete", MagicMock()
+    ) as mock_delete, patch(
+        "sqlalchemy.create_engine", return_value=engine
+    ), patch("sqlalchemy.orm.sessionmaker", return_value=TestSessionLocal), patch(
+        "app.celery.worker_hooks.time.sleep"
+    ):
+        from app.celery_app import sync_tasks_with_database
+
+        sync_tasks_with_database()
+
+    assert mock_revoke.called, "revoke should be called during restart sync"
+    assert mock_delete.called, "backend.delete should be called during restart sync"
     
     # Verify the task in DB is still stopped
     task_after = db.query(Task).filter(Task.id == 20).first()
@@ -314,26 +301,16 @@ def test_handles_missing_celery_task_id():
     db.add(stopped_task)
     db.commit()
     
-    # Mock Celery control/backend
-    mock_control = MagicMock()
-    mock_backend = MagicMock()
-    
-    with patch.object(celery_app, 'control', mock_control):
-        with patch.object(celery_app, 'backend', mock_backend):
-            with patch('app.celery_app.SessionLocal', return_value=db):
-                # This should not crash
-                from app.celery_app import sync_tasks_with_database
-                try:
-                    sync_tasks_with_database()
-                    success = True
-                except Exception as e:
-                    print(f"✗ Sync crashed: {e}")
-                    success = False
-    
-    assert success, "Sync should handle tasks without celery_task_id gracefully"
-    
-    # revoke should not have been called since there's no celery_task_id
-    assert not mock_control.revoke.called, "revoke should not be called for tasks without celery_task_id"
+    with patch.object(celery_app.control, "revoke", MagicMock()) as mock_revoke, patch.object(
+        celery_app.backend, "delete", MagicMock()
+    ), patch("sqlalchemy.create_engine", return_value=engine), patch(
+        "sqlalchemy.orm.sessionmaker", return_value=TestSessionLocal
+    ), patch("app.celery.worker_hooks.time.sleep"):
+        from app.celery_app import sync_tasks_with_database
+
+        sync_tasks_with_database()
+
+    assert not mock_revoke.called, "revoke should not be called for tasks without celery_task_id"
     
     print("✓ Sync handles tasks without celery_task_id: PASSED")
     return True

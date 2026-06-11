@@ -1,15 +1,23 @@
 #!/usr/bin/env python3
 """
 Test script to verify annotation data format and check why annotations aren't showing.
+
+Skipped in default pytest runs — requires live Postgres and an existing dataset.
+Set LAI_INTEGRATION_TESTS=1 and point DATABASE_URL at your stack.
 """
 import sys
 import json
 
+import pytest
 from sqlalchemy.orm import Session
+
+from conftest import requires_integration_stack
+
+pytestmark = [pytest.mark.integration, requires_integration_stack]
 from app.database import SessionLocal
 from app.models import Dataset, Image, Annotation, AnnotationFile
 
-def test_annotation_data(dataset_id: int):
+def test_annotation_data(dataset_id: int = 22):
     """Test annotation data format."""
     db: Session = SessionLocal()
     

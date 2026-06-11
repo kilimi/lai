@@ -115,6 +115,8 @@ def parse_lai_metrics_line(line: str) -> Optional[Dict[str, Any]]:
 
 def _normalize_loss_key(name: str) -> str:
     lowered = name.lower().replace("/", "_").replace(" ", "_")
+    if lowered == "loss":
+        return "loss"
     if "box" in lowered:
         return "box_loss"
     if "seg" in lowered:

@@ -1,0 +1,11 @@
+# Optional host packages for tests that import torch / ultralytics directly.
+# Install after requirements.txt when you want fewer skips on the host:
+#
+#   pip install -r tests/python/requirements-gpu-extras.txt
+#
+# Not required for training_smoke (uses worker-gpu container).
+
+torch>=2.0.0
+ultralytics>=8.0.0
+
+

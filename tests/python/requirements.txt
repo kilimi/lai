@@ -1,0 +1,34 @@
+# Host dependencies for tests/python (pytest suite).
+# Python 3.10+
+#
+# From repo root (required — do not cd into tests/python first):
+#   pip install -r tests/python/requirements.txt
+#
+# Run tests:
+#   pytest tests/python/
+#   pytest tests/python -q -m "not training_smoke"    # skip GPU training matrix
+#
+# training_smoke / test_training_env also need Docker Compose and a healthy
+# worker-gpu container (see README_advanced.md). No extra pip packages for that.
+
+# FastAPI app, SQLAlchemy, Celery, FiftyOne, OpenCV, Redis, etc.
+-r ../../backend/requirements-backend.txt
+
+# lai CLI package (wizard, registry, compose_files, compose_build tests)
+# Path is relative to your shell cwd — run pip from the repo root (directory with pyproject.toml).
+-e .
+
+# Test runner
+pytest>=8.0,<10
+
+# YAML fixtures (compose contract, training smoke data.yaml, dataset load helpers)
+PyYAML>=6.0
+
+# Geospatial imports at module load (test_rotation_angles.py, test_single_annotation.py)
+geopandas>=0.14.0
+rasterio>=1.3.0
+shapely>=2.0.0
+
+# Optional host GPU stack — uncomment to reduce skipped tests (heavy install).
+# Training smoke still runs inside worker-gpu via Docker when LAI_RUN_TRAINING_SMOKE=1.
+# -r requirements-gpu-extras.txt

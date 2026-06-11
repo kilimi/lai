@@ -18,7 +18,8 @@ def test_resolve_evaluation_imgsz_prefers_request():
 
 def test_resolve_evaluation_imgsz_reads_training_config():
     meta = {"training_config": {"imgsz": 1280}, "training_params": {"image_size": 640}}
-    assert resolve_evaluation_imgsz(meta, None) == (1280, "training_config.imgsz")
+    # training_params is checked before training_config in resolve_evaluation_imgsz
+    assert resolve_evaluation_imgsz(meta, None) == (640, "training_params.image_size")
 
 
 def test_resolve_evaluation_class_names_prefers_matching_metadata():

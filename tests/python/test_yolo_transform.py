@@ -1,10 +1,18 @@
 #!/usr/bin/env python3
 """
 Test script to verify database annotation transformation to YOLO segmentation format.
+
+Skipped in default pytest runs — requires live Postgres and an existing dataset.
+Set LAI_INTEGRATION_TESTS=1 and point DATABASE_URL at your stack.
 """
 
 import sys
-from pathlib import Path
+
+import pytest
+
+from conftest import requires_integration_stack
+
+pytestmark = [pytest.mark.integration, requires_integration_stack]
 from sqlalchemy.orm import Session
 from app.database import SessionLocal
 from app.models import Dataset, Image, Annotation, AnnotationClass, AnnotationFile
