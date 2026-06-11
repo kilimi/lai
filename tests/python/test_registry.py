@@ -7,9 +7,11 @@ import pytest
 
 from lai.compose_build import uses_local_build
 from lai.registry import (
+    RegistryTagResolutionError,
     _embedded_registry_org,
     _org_from_image_ref,
     default_bundle_url,
+    embedded_docker_fallback_tag,
     fetch_dockerhub_latest_tag,
     gpu_tier_enabled,
     is_developer_checkout,
@@ -97,58 +99,30 @@ def test_gpu_tier_enabled_from_env():
 
 
 def test_fetch_dockerhub_latest_tag_picks_highest_semver(monkeypatch):
-    pages = [
-        {
-            "results": [
-                {"name": "0.1.0"},
-                {"name": "0.2.0"},
-                {"name": "latest"},
-            ],
-            "next": None,
-        }
-    ]
-
-    def fake_urlopen(req, timeout=15.0):
-        import json as _json
-        from io import BytesIO
-
-        class Resp:
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *args):
-                return False
-
-            def read(self):
-                return _json.dumps(pages.pop(0)).encode("utf-8")
-
-        return Resp()
-
-    monkeypatch.setattr("lai.registry.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(
+        "lai.registry._fetch_tags_registry_v2",
+        lambda org, repo, timeout=15.0: ["0.1.0", "0.2.0", "latest"],
+    )
+    monkeypatch.setattr("lai.registry._fetch_tags_hub_api", lambda *a, **k: None)
     assert fetch_dockerhub_latest_tag("luluray") == "0.2.0"
 
 
-def test_fetch_dockerhub_latest_tag_falls_back_to_latest(monkeypatch):
-    def fake_urlopen(req, timeout=15.0):
-        import json as _json
-        from io import BytesIO
-
-        class Resp:
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *args):
-                return False
-
-            def read(self):
-                return _json.dumps(
-                    {"results": [{"name": "latest"}], "next": None}
-                ).encode("utf-8")
-
-        return Resp()
-
-    monkeypatch.setattr("lai.registry.urllib.request.urlopen", fake_urlopen)
+def test_fetch_dockerhub_latest_tag_falls_back_to_latest_when_listed(monkeypatch):
+    monkeypatch.setattr(
+        "lai.registry._fetch_tags_registry_v2",
+        lambda org, repo, timeout=15.0: ["latest"],
+    )
+    monkeypatch.setattr("lai.registry._fetch_tags_hub_api", lambda *a, **k: None)
     assert fetch_dockerhub_latest_tag("luluray") == "latest"
+
+
+def test_fetch_dockerhub_latest_tag_uses_hub_api_when_registry_fails(monkeypatch):
+    monkeypatch.setattr("lai.registry._fetch_tags_registry_v2", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "lai.registry._fetch_tags_hub_api",
+        lambda org, repo, timeout=15.0: ["0.3.1"],
+    )
+    assert fetch_dockerhub_latest_tag("luluray") == "0.3.1"
 
 
 def test_resolve_release_version_uses_dockerhub_when_auto(monkeypatch):
@@ -177,14 +151,37 @@ def test_resolve_release_version_skips_hub_when_auto_disabled(monkeypatch):
     )
 
 
-def test_resolve_release_version_uses_latest_when_hub_unreachable(monkeypatch):
+def test_resolve_release_version_uses_env_semver_when_hub_unreachable(monkeypatch):
     monkeypatch.setattr("lai.registry.fetch_dockerhub_latest_tag", lambda org: None)
-    assert resolve_release_version({"LAI_RELEASE_VERSION": "0.1.0"}) == "latest"
+    monkeypatch.setattr("lai.registry.embedded_docker_fallback_tag", lambda: None)
+    assert resolve_release_version(
+        {
+            "LAI_BACKEND_IMAGE": "docker.io/luluray/lai-backend:0.1.0",
+        }
+    ) == "0.1.0"
 
 
-def test_resolve_release_version_defaults_to_latest_without_env(monkeypatch):
+def test_resolve_release_version_uses_embedded_fallback(monkeypatch):
     monkeypatch.setattr("lai.registry.fetch_dockerhub_latest_tag", lambda org: None)
-    assert resolve_release_version({}) == "latest"
+    monkeypatch.setattr("lai.registry.embedded_docker_fallback_tag", lambda: "0.4.0")
+    assert resolve_release_version({}) == "0.4.0"
+
+
+def test_resolve_release_version_raises_without_fallback(monkeypatch):
+    monkeypatch.setattr("lai.registry.fetch_dockerhub_latest_tag", lambda org: None)
+    monkeypatch.setattr("lai.registry.embedded_docker_fallback_tag", lambda: None)
+    with pytest.raises(RegistryTagResolutionError):
+        resolve_release_version({})
+
+
+def test_embedded_docker_fallback_tag_from_json(tmp_path, monkeypatch):
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    (bundle / "docker_release.json").write_text(
+        '{"docker_tag":"0.5.0","org":"luluray"}', encoding="utf-8"
+    )
+    monkeypatch.setattr("lai.paths.embedded_bundle_dir", lambda: bundle)
+    assert embedded_docker_fallback_tag() == "0.5.0"
 
 
 def test_write_registry_env_uses_hub_version(tmp_path: Path, monkeypatch):

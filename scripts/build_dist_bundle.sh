@@ -14,13 +14,31 @@ EMBED="${ROOT}/lai/bundle"
 
 REGISTRY="${LAI_REGISTRY:-docker.io}"
 ORG="${LAI_DOCKERHUB_USER:-${LAI_GHCR_ORG:-luluray}}"
-# Docker image tag is resolved at install/pull time (Docker Hub), not tied to PyPI VERSION.
-DOCKER_TAG="${LAI_DOCKER_TAG:-latest}"
 if [[ "$REGISTRY" == "docker.io" ]]; then
   IMAGE_PREFIX="docker.io/${ORG}"
 else
   IMAGE_PREFIX="${REGISTRY}/${ORG}"
 fi
+
+# Query Docker Hub at publish time; install-time lookup uses the same helpers.
+DOCKER_TAG=""
+if command -v python3 >/dev/null 2>&1; then
+  DOCKER_TAG="$(python3 -c "
+import sys
+sys.path.insert(0, '${ROOT}')
+from lai.registry import fetch_dockerhub_latest_tag
+print(fetch_dockerhub_latest_tag('${ORG}') or '')
+" 2>/dev/null || true)"
+fi
+if [[ -z "$DOCKER_TAG" ]]; then
+  DOCKER_TAG="${LAI_DOCKER_TAG:-}"
+fi
+if [[ -z "$DOCKER_TAG" ]]; then
+  echo "ERROR: could not resolve a Docker image tag from Docker Hub for ${ORG}/lai-backend." >&2
+  echo "Set LAI_DOCKER_TAG (e.g. 0.1.0) and re-run." >&2
+  exit 1
+fi
+echo "Bundling Docker image tag: ${DOCKER_TAG} (PyPI package version: ${VERSION})"
 
 populate_stage() {
   local dest="$1"
@@ -45,6 +63,10 @@ populate_stage() {
     cp "$ROOT/licenses/"*.txt "$dest/licenses/" 2>/dev/null || true
   fi
 
+  cat > "$dest/docker_release.json" <<EOF
+{"docker_tag":"${DOCKER_TAG}","org":"${ORG}","registry":"${REGISTRY}"}
+EOF
+
   cat > "$dest/.env.example" <<EOF
 # LAI pull-only install — run: lai install-gui  or  lai install
 LAI_DATA_DIR=\${HOME}/lai-data
@@ -56,7 +78,7 @@ COMPOSE_PROJECT_NAME=lai
 COMPOSE_FILE=docker-compose.yml
 COMPOSE_PROFILES=gpu
 LAI_AUTO_DOCKER_LATEST=1
-# LAI_RELEASE_VERSION is filled by lai install / lai pull from Docker Hub (not PyPI version).
+LAI_RELEASE_VERSION=${DOCKER_TAG}
 LAI_BACKEND_IMAGE=${IMAGE_PREFIX}/lai-backend:${DOCKER_TAG}
 LAI_WORKER_GENERAL_IMAGE=${IMAGE_PREFIX}/lai-worker-general:${DOCKER_TAG}
 LAI_WORKER_GPU_IMAGE=${IMAGE_PREFIX}/lai-worker-gpu:${DOCKER_TAG}

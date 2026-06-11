@@ -4,14 +4,14 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
+import ssl
+import subprocess
 import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
 
-# Default Docker Hub namespace when nothing else is configured (see registry_org()).
-# Default image tag when Hub lookup is unavailable (never tied to PyPI laivision version).
-DEFAULT_DOCKER_TAG = "latest"
 DEFAULT_DOCKERHUB_USER = "luluray"
 GITHUB_REPO = os.environ.get("LAI_GITHUB_REPO", "lulu/lai")
 
@@ -122,6 +122,182 @@ def is_developer_checkout(bundle_root: Path) -> bool:
 
 _CANONICAL_HUB_REPO = "lai-backend"
 _SEMVER_TAG = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
+_IMAGE_TAG_RE = re.compile(r":([^:@]+)(?:@|$)")
+
+
+class RegistryTagResolutionError(RuntimeError):
+    """Could not determine a Docker image tag that exists on the registry."""
+
+
+def _ssl_context() -> ssl.SSLContext:
+    ctx = ssl.create_default_context()
+    try:
+        import certifi
+
+        ctx.load_verify_locations(certifi.where())
+    except ImportError:
+        pass
+    return ctx
+
+
+def _http_json(url: str, *, headers: dict[str, str] | None = None, timeout: float = 15.0) -> object | None:
+    req = urllib.request.Request(url, headers=headers or {})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout, context=_ssl_context()) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except (
+        urllib.error.URLError,
+        urllib.error.HTTPError,
+        TimeoutError,
+        json.JSONDecodeError,
+        OSError,
+        ssl.SSLError,
+    ):
+        return _http_json_curl(url, headers=headers, timeout=timeout)
+
+
+def _http_json_curl(
+    url: str, *, headers: dict[str, str] | None = None, timeout: float = 15.0
+) -> object | None:
+    """Fallback for environments where Python's SSL stack cannot reach Docker Hub."""
+    curl = shutil.which("curl") or shutil.which("curl.exe")
+    if not curl:
+        return None
+    cmd = [curl, "-fsSL", "--max-time", str(int(max(1, timeout)))]
+    for key, value in (headers or {}).items():
+        cmd.extend(["-H", f"{key}: {value}"])
+    cmd.append(url)
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    except OSError:
+        return None
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return None
+    try:
+        return json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return None
+
+
+def _pick_best_tag(names: list[str]) -> str | None:
+    """Highest x.y.z tag, else ``latest`` only when that name is present."""
+    best_ver: tuple[int, int, int] | None = None
+    best_name: str | None = None
+    saw_latest = False
+    for raw in names:
+        name = str(raw or "").strip()
+        if not name:
+            continue
+        if name == "latest":
+            saw_latest = True
+            continue
+        m = _SEMVER_TAG.fullmatch(name)
+        if not m:
+            continue
+        key = (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        if best_ver is None or key > best_ver:
+            best_ver = key
+            best_name = name.lstrip("v")
+    if best_name:
+        return best_name
+    if saw_latest:
+        return "latest"
+    return None
+
+
+def _tag_from_image_ref(image_ref: str) -> str | None:
+    m = _IMAGE_TAG_RE.search((image_ref or "").strip())
+    return m.group(1) if m else None
+
+
+def _embedded_docker_release_file() -> Path | None:
+    from lai.paths import embedded_bundle_dir
+
+    path = embedded_bundle_dir() / "docker_release.json"
+    return path if path.is_file() else None
+
+
+def embedded_docker_fallback_tag() -> str | None:
+    """
+    Tag baked into the PyPI wheel at publish time (queried from Docker Hub in CI).
+
+    Also reads a semver tag from bundled ``.env.example`` when ``docker_release.json``
+    is missing.
+    """
+    release_file = _embedded_docker_release_file()
+    if release_file is not None:
+        try:
+            data = json.loads(release_file.read_text(encoding="utf-8"))
+            tag = str(data.get("docker_tag") or "").strip().lstrip("v")
+            if tag and tag != "latest":
+                return tag
+        except (OSError, json.JSONDecodeError, TypeError):
+            pass
+
+    from lai.paths import embedded_bundle_dir
+
+    example = embedded_bundle_dir() / ".env.example"
+    if example.is_file():
+        try:
+            for line in example.read_text(encoding="utf-8").splitlines():
+                if line.startswith("LAI_BACKEND_IMAGE="):
+                    tag = _tag_from_image_ref(line.split("=", 1)[1])
+                    if tag and tag != "latest" and _SEMVER_TAG.fullmatch(tag.lstrip("v")):
+                        return tag.lstrip("v")
+        except OSError:
+            pass
+    return None
+
+
+def _tag_from_env_images(env: dict[str, str]) -> str | None:
+    for key in ("LAI_RELEASE_VERSION",):
+        raw = (env.get(key) or "").strip().lstrip("v")
+        if raw and raw != "latest" and _SEMVER_TAG.fullmatch(raw):
+            return raw
+    for key in IMAGE_ENV_KEYS:
+        tag = _tag_from_image_ref(env.get(key, ""))
+        if tag and tag != "latest" and _SEMVER_TAG.fullmatch(tag.lstrip("v")):
+            return tag.lstrip("v")
+    return None
+
+
+def _fetch_tags_registry_v2(org: str, repo: str, *, timeout: float = 15.0) -> list[str] | None:
+    """List tags via ``registry-1.docker.io`` (works when hub.docker.com API fails)."""
+    token_url = (
+        "https://auth.docker.io/token"
+        f"?service=registry.docker.io&scope=repository:{org}/{repo}:pull"
+    )
+    token_data = _http_json(token_url, timeout=timeout)
+    if not isinstance(token_data, dict):
+        return None
+    token = str(token_data.get("token") or "").strip()
+    if not token:
+        return None
+    tags_url = f"https://registry-1.docker.io/v2/{org}/{repo}/tags/list"
+    data = _http_json(tags_url, headers={"Authorization": f"Bearer {token}"}, timeout=timeout)
+    if not isinstance(data, dict):
+        return None
+    tags = data.get("tags")
+    return [str(t) for t in tags] if isinstance(tags, list) else None
+
+
+def _fetch_tags_hub_api(org: str, repo: str, *, timeout: float = 15.0) -> list[str] | None:
+    names: list[str] = []
+    url: str | None = f"https://hub.docker.com/v2/repositories/{org}/{repo}/tags?page_size=100"
+    while url:
+        data = _http_json(url, headers={"Accept": "application/json"}, timeout=timeout)
+        if not isinstance(data, dict):
+            return None
+        for item in data.get("results") or []:
+            if isinstance(item, dict):
+                name = str(item.get("name") or "").strip()
+                if name:
+                    names.append(name)
+        nxt = data.get("next")
+        url = str(nxt) if nxt else None
+    return names
+
+
 
 
 def _env_bool(val: str | None, *, default: bool) -> bool:
@@ -158,10 +334,10 @@ def fetch_dockerhub_latest_tag(
     timeout: float = 15.0,
 ) -> str | None:
     """
-    Highest PEP-440-style x.y.z tag on Docker Hub for ``org/repo``.
+    Highest semver tag on Docker Hub for ``org/repo``.
 
-    Falls back to the ``latest`` tag when no semver tags exist. Returns None if
-    the registry cannot be reached or the repository is missing.
+    Uses the Docker Registry v2 API first, then hub.docker.com. Returns ``latest``
+    only when that tag is actually listed. Returns None when the repo cannot be read.
     """
     if _registry_host() != "docker.io":
         return None
@@ -169,39 +345,13 @@ def fetch_dockerhub_latest_tag(
     if not org:
         return None
 
-    best_ver: tuple[int, int, int] | None = None
-    best_name: str | None = None
-    saw_latest = False
-    url: str | None = (
-        f"https://hub.docker.com/v2/repositories/{org}/{repo}/tags?page_size=100"
-    )
-    headers = {"Accept": "application/json"}
-
-    try:
-        while url:
-            req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-            for item in data.get("results") or []:
-                name = str(item.get("name") or "")
-                if name == "latest":
-                    saw_latest = True
-                    continue
-                m = _SEMVER_TAG.fullmatch(name)
-                if not m:
-                    continue
-                key = (int(m.group(1)), int(m.group(2)), int(m.group(3)))
-                if best_ver is None or key > best_ver:
-                    best_ver = key
-                    best_name = name.lstrip("v")
-            url = data.get("next")
-    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError, OSError):
-        return None
-
-    if best_name:
-        return best_name
-    if saw_latest:
-        return "latest"
+    for fetcher in (_fetch_tags_registry_v2, _fetch_tags_hub_api):
+        names = fetcher(org, repo, timeout=timeout)
+        if not names:
+            continue
+        picked = _pick_best_tag(names)
+        if picked:
+            return picked
     return None
 
 
@@ -209,9 +359,8 @@ def resolve_release_version(env: dict[str, str] | None = None) -> str:
     """
     Docker image tag to pull (independent of the PyPI ``laivision`` package version).
 
-    Order: pinned ``LAI_PIN_DOCKER_VERSION`` + ``LAI_RELEASE_VERSION`` → Docker Hub
-    newest x.y.z (or ``latest``) when ``LAI_AUTO_DOCKER_LATEST`` is on → explicit
-    ``LAI_RELEASE_VERSION`` → ``latest``.
+    Order: pinned ``LAI_PIN_DOCKER_VERSION`` → live Docker Hub lookup → bundled /
+    existing semver fallback. Never guesses ``latest`` when that tag is not on Hub.
     """
     env = env or {}
     pinned = _env_bool(env.get("LAI_PIN_DOCKER_VERSION"), default=False) or _env_bool(
@@ -226,12 +375,28 @@ def resolve_release_version(env: dict[str, str] | None = None) -> str:
         remote = fetch_dockerhub_latest_tag(registry_org())
         if remote:
             return remote.lstrip("v")
-        return DEFAULT_DOCKER_TAG
+        for fallback in (embedded_docker_fallback_tag(), _tag_from_env_images(env)):
+            if fallback:
+                print(
+                    f"Docker Hub tag lookup failed; using {fallback!r}",
+                    file=sys.stderr,
+                )
+                return fallback.lstrip("v")
+        raise RegistryTagResolutionError(
+            "Could not determine a Docker image tag from Docker Hub. "
+            "Check your network, set LAI_PIN_DOCKER_VERSION=1 and LAI_RELEASE_VERSION=<tag> "
+            "(e.g. 0.1.0), or upgrade laivision after images are published."
+        )
 
     ver = (env.get("LAI_RELEASE_VERSION") or os.environ.get("LAI_RELEASE_VERSION", "")).strip()
     if ver:
         return ver.lstrip("v")
-    return DEFAULT_DOCKER_TAG
+    fallback = embedded_docker_fallback_tag() or _tag_from_env_images(env)
+    if fallback:
+        return fallback.lstrip("v")
+    raise RegistryTagResolutionError(
+        "No Docker image tag configured. Run lai install or set LAI_RELEASE_VERSION."
+    )
 
 
 def release_version() -> str:
@@ -251,7 +416,11 @@ def refresh_registry_tags(bundle_root: Path) -> str | None:
     env = _parse_env_file(env_file)
     if not _auto_docker_latest_enabled(env):
         return None
-    ver = resolve_release_version(env)
+    try:
+        ver = resolve_release_version(env)
+    except RegistryTagResolutionError as exc:
+        print(f"Warning: {exc}", file=sys.stderr)
+        return None
     old = (env.get("LAI_RELEASE_VERSION") or "").lstrip("v")
     if ver != old:
         print(f"Docker Hub image tag: {ver}" + (f" (was {old})" if old else ""), file=sys.stderr)
