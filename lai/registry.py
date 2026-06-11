@@ -9,9 +9,9 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from lai import __version__
-
 # Default Docker Hub namespace when nothing else is configured (see registry_org()).
+# Default image tag when Hub lookup is unavailable (never tied to PyPI laivision version).
+DEFAULT_DOCKER_TAG = "latest"
 DEFAULT_DOCKERHUB_USER = "luluray"
 GITHUB_REPO = os.environ.get("LAI_GITHUB_REPO", "lulu/lai")
 
@@ -207,10 +207,11 @@ def fetch_dockerhub_latest_tag(
 
 def resolve_release_version(env: dict[str, str] | None = None) -> str:
     """
-    Docker image tag to pull.
+    Docker image tag to pull (independent of the PyPI ``laivision`` package version).
 
-    Order: pinned ``LAI_RELEASE_VERSION`` → Docker Hub newest x.y.z (or ``latest``)
-    → ``LAI_RELEASE_VERSION`` / PyPI package version.
+    Order: pinned ``LAI_PIN_DOCKER_VERSION`` + ``LAI_RELEASE_VERSION`` → Docker Hub
+    newest x.y.z (or ``latest``) when ``LAI_AUTO_DOCKER_LATEST`` is on → explicit
+    ``LAI_RELEASE_VERSION`` → ``latest``.
     """
     env = env or {}
     pinned = _env_bool(env.get("LAI_PIN_DOCKER_VERSION"), default=False) or _env_bool(
@@ -225,11 +226,12 @@ def resolve_release_version(env: dict[str, str] | None = None) -> str:
         remote = fetch_dockerhub_latest_tag(registry_org())
         if remote:
             return remote.lstrip("v")
+        return DEFAULT_DOCKER_TAG
 
     ver = (env.get("LAI_RELEASE_VERSION") or os.environ.get("LAI_RELEASE_VERSION", "")).strip()
     if ver:
         return ver.lstrip("v")
-    return (__version__ or "0.0.0").lstrip("v")
+    return DEFAULT_DOCKER_TAG
 
 
 def release_version() -> str:
@@ -247,6 +249,8 @@ def refresh_registry_tags(bundle_root: Path) -> str | None:
 
     env_file = resolve_env_file(bundle_root)
     env = _parse_env_file(env_file)
+    if not _auto_docker_latest_enabled(env):
+        return None
     ver = resolve_release_version(env)
     old = (env.get("LAI_RELEASE_VERSION") or "").lstrip("v")
     if ver != old:

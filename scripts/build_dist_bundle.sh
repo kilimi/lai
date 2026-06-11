@@ -14,6 +14,8 @@ EMBED="${ROOT}/lai/bundle"
 
 REGISTRY="${LAI_REGISTRY:-docker.io}"
 ORG="${LAI_DOCKERHUB_USER:-${LAI_GHCR_ORG:-luluray}}"
+# Docker image tag is resolved at install/pull time (Docker Hub), not tied to PyPI VERSION.
+DOCKER_TAG="${LAI_DOCKER_TAG:-latest}"
 if [[ "$REGISTRY" == "docker.io" ]]; then
   IMAGE_PREFIX="docker.io/${ORG}"
 else
@@ -54,14 +56,14 @@ COMPOSE_PROJECT_NAME=lai
 COMPOSE_FILE=docker-compose.yml
 COMPOSE_PROFILES=gpu
 LAI_AUTO_DOCKER_LATEST=1
-LAI_RELEASE_VERSION=${VERSION}
-LAI_BACKEND_IMAGE=${IMAGE_PREFIX}/lai-backend:${VERSION}
-LAI_WORKER_GENERAL_IMAGE=${IMAGE_PREFIX}/lai-worker-general:${VERSION}
-LAI_WORKER_GPU_IMAGE=${IMAGE_PREFIX}/lai-worker-gpu:${VERSION}
-LAI_FRONTEND_IMAGE=${IMAGE_PREFIX}/lai-frontend:${VERSION}
-LAI_SAM_IMAGE=${IMAGE_PREFIX}/lai-sam:${VERSION}
-LAI_ULTRALYTICS_IMAGE=${IMAGE_PREFIX}/lai-ultralytics:${VERSION}
-LAI_MMYOLO_IMAGE=${IMAGE_PREFIX}/lai-mmyolo:${VERSION}
+# LAI_RELEASE_VERSION is filled by lai install / lai pull from Docker Hub (not PyPI version).
+LAI_BACKEND_IMAGE=${IMAGE_PREFIX}/lai-backend:${DOCKER_TAG}
+LAI_WORKER_GENERAL_IMAGE=${IMAGE_PREFIX}/lai-worker-general:${DOCKER_TAG}
+LAI_WORKER_GPU_IMAGE=${IMAGE_PREFIX}/lai-worker-gpu:${DOCKER_TAG}
+LAI_FRONTEND_IMAGE=${IMAGE_PREFIX}/lai-frontend:${DOCKER_TAG}
+LAI_SAM_IMAGE=${IMAGE_PREFIX}/lai-sam:${DOCKER_TAG}
+LAI_ULTRALYTICS_IMAGE=${IMAGE_PREFIX}/lai-ultralytics:${DOCKER_TAG}
+LAI_MMYOLO_IMAGE=${IMAGE_PREFIX}/lai-mmyolo:${DOCKER_TAG}
 SAM3_MODELS_HOST_PATH=\${HOME}/lai-data/sam3-models
 SAM3_CHECKPOINT_FILENAME=sam3.pt
 EOF

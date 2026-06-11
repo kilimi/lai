@@ -324,8 +324,12 @@ fi
 
 if [[ "$IS_DEVELOPER" -eq 0 ]] || [[ "$BIND_CODE" -eq 0 ]]; then
   if command -v python3 >/dev/null 2>&1; then
-    python3 "$ROOT/scripts/write_registry_env.py" --env "$ENV_FILE" --bundle-root "$ROOT" --gpu-tier "$GPU_TIER" \
-      ${LAI_RELEASE_VERSION:+--version "$LAI_RELEASE_VERSION"} || true
+    # Resolve image tags from Docker Hub unless the user pinned a version.
+    REGISTRY_ARGS=(--env "$ENV_FILE" --bundle-root "$ROOT" --gpu-tier "$GPU_TIER")
+    if [[ "${LAI_PIN_DOCKER_VERSION:-0}" == "1" ]] && [[ -n "${LAI_RELEASE_VERSION:-}" ]]; then
+      REGISTRY_ARGS+=(--version "$LAI_RELEASE_VERSION")
+    fi
+    python3 "$ROOT/scripts/write_registry_env.py" "${REGISTRY_ARGS[@]}" || true
   fi
 fi
 

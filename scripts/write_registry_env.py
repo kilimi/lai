@@ -18,7 +18,11 @@ def main() -> int:
     p.add_argument("--env", type=Path, required=True, help="Path to .env file")
     p.add_argument("--bundle-root", type=Path, default=ROOT, help="Bundle / repo root")
     p.add_argument("--gpu-tier", choices=("0", "1"), default="0")
-    p.add_argument("--version", default="", help="Release version tag (default: lai package version)")
+    p.add_argument(
+        "--version",
+        default="",
+        help="Pin Docker image tag (default: resolve from Docker Hub / LAI_RELEASE_VERSION)",
+    )
     p.add_argument("--force", action="store_true", help="Write even in a developer checkout")
     args = p.parse_args()
 

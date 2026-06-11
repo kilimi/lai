@@ -166,6 +166,9 @@ def cmd_up(ns: argparse.Namespace) -> int:
     extra = ns.docker_compose_args or []
 
     if not uses_local_build(root):
+        from lai.registry import refresh_registry_tags
+
+        refresh_registry_tags(root)
         missing = missing_registry_images(root)
         if missing or ns.pull:
             if missing:

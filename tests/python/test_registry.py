@@ -177,6 +177,16 @@ def test_resolve_release_version_skips_hub_when_auto_disabled(monkeypatch):
     )
 
 
+def test_resolve_release_version_uses_latest_when_hub_unreachable(monkeypatch):
+    monkeypatch.setattr("lai.registry.fetch_dockerhub_latest_tag", lambda org: None)
+    assert resolve_release_version({"LAI_RELEASE_VERSION": "0.1.0"}) == "latest"
+
+
+def test_resolve_release_version_defaults_to_latest_without_env(monkeypatch):
+    monkeypatch.setattr("lai.registry.fetch_dockerhub_latest_tag", lambda org: None)
+    assert resolve_release_version({}) == "latest"
+
+
 def test_write_registry_env_uses_hub_version(tmp_path: Path, monkeypatch):
     env_file = tmp_path / ".env"
     monkeypatch.setattr("lai.registry.fetch_dockerhub_latest_tag", lambda org: "2.0.0")
