@@ -105,11 +105,15 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "pgrep -f 'celery.*worker' > /dev/null || exit 1"]
+      test:
+        [
+          "CMD-SHELL",
+          "python -m celery -A app.celery.general_app inspect ping --timeout=10 2>/dev/null | grep -qE 'OK|pong' || exit 1",
+        ]
       interval: 30s
-      timeout: 5s
+      timeout: 15s
       retries: 3
-      start_period: 40s
+      start_period: 60s
     restart: unless-stopped
 
   # GPU worker: YOLO train/eval/export, auto-annotate, MMYOLO (subprocess)
@@ -209,11 +213,15 @@ services:
       worker-general:
         condition: service_started
     healthcheck:
-      test: ["CMD-SHELL", "pgrep -f 'celery.*flower' > /dev/null || exit 1"]
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:5555/', timeout=5)\"",
+        ]
       interval: 30s
-      timeout: 5s
+      timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 60s
     restart: unless-stopped
 
   # Redis for Celery broker and result backend
