@@ -57,7 +57,8 @@ def from_ultralytics_result(
             try:
                 poly = masks.xy[i]
                 if poly is not None and len(poly) > 0:
-                    seg = [[float(v) for v in pt[:2]] for pt in poly]
+                    flat = [float(v) for pt in poly for v in pt[:2]]
+                    seg = [flat] if len(flat) >= 6 else None
             except Exception:
                 seg = None
 

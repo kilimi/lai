@@ -54,10 +54,6 @@ TASK_ROUTES = {
 }
 
 BEAT_SCHEDULE = {
-    "check-backup-schedule": {
-        "task": "app.tasks.backup_tasks.run_automatic_backup",
-        "schedule": timedelta(hours=1),
-    },
     "auto-cancel-stale-tasks": {
         "task": "app.tasks.task_monitoring.auto_cancel_stale_tasks",
         "schedule": timedelta(minutes=30),
@@ -74,7 +70,7 @@ TASK_QUEUES = (
 KNOWN_TASK_QUEUES = {
     "app.tasks.dataset_tasks.duplicate_dataset": "general",
     "app.tasks.augmentation_tasks.create_augmented_dataset": "general",
-    "app.tasks.backup_tasks.run_automatic_backup": "general",
+    "app.tasks.backup_tasks.run_manual_backup": "general",
     "app.tasks.task_monitoring.auto_cancel_stale_tasks": "general",
     "app.tasks.task_monitoring.refresh_worker_gpu_status": "gpu",
     "app.tasks.annotation_tasks.process_annotation_file": "general",

@@ -143,7 +143,9 @@ def extract_yolo_image_predictions(
                     if idx < len(masks.xy):
                         mask = masks.xy[idx]
                         if mask is not None and len(mask) > 0:
-                            rec.segmentation = [[float(v) for v in pt[:2]] for pt in mask]
+                            flat = [float(v) for pt in mask for v in pt[:2]]
+                            if len(flat) >= 6:
+                                rec.segmentation = [flat]
                 except (IndexError, AttributeError, TypeError):
                     continue
 

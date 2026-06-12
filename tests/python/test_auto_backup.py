@@ -1,4 +1,4 @@
-"""Tests for automatic backup path resolution, service, and API routes."""
+"""Tests for manual backup path resolution, service, and API routes."""
 from __future__ import annotations
 
 import json
@@ -56,9 +56,9 @@ def backup_api_client(tmp_path, monkeypatch):
         yield client, TestingSession
 
 
-def _seed_backup_settings(session, *, enabled=True, backup_path=""):
+def _seed_backup_settings(session, *, backup_path=""):
     settings = models.BackupSettings(
-        enabled=enabled,
+        enabled=False,
         backup_path=backup_path,
         frequency_hours=24,
         retention_days=30,
@@ -109,16 +109,13 @@ class TestResolveBackupPaths:
 
 class TestBackupConfigured:
     def test_empty_path_is_configured(self):
-        settings = models.BackupSettings(enabled=True, backup_path="")
+        settings = models.BackupSettings(enabled=False, backup_path="")
         assert is_backup_path_configured(settings)
         assert is_backup_configured(settings)
 
     def test_none_path_not_configured(self):
-        settings = models.BackupSettings(enabled=True, backup_path=None)
+        settings = models.BackupSettings(enabled=False, backup_path=None)
         assert not is_backup_path_configured(settings)
-
-    def test_disabled_not_configured(self):
-        settings = models.BackupSettings(enabled=False, backup_path="")
         assert not is_backup_configured(settings)
 
 
@@ -195,22 +192,21 @@ class TestBackupServiceRestore:
 
 
 class TestBackupRouter:
-    def test_run_backup_accepts_empty_path_when_enabled(self, backup_api_client):
+    def test_run_backup_accepts_empty_path(self, backup_api_client):
         client, Session = backup_api_client
         with Session() as db:
-            _seed_backup_settings(db, enabled=True, backup_path="")
+            _seed_backup_settings(db, backup_path="")
 
-        with patch("app.routers.backup.run_backup") as mock_run:
-            mock_run.return_value = BackupResult(status="completed", backup_id=1)
+        with patch("app.routers.backup._dispatch_manual_backup") as mock_dispatch:
             response = client.post("/backup/run")
 
         assert response.status_code == 200
-        mock_run.assert_called_once()
+        mock_dispatch.assert_called_once()
 
-    def test_run_backup_rejects_when_disabled(self, backup_api_client):
+    def test_run_backup_rejects_when_path_not_configured(self, backup_api_client):
         client, Session = backup_api_client
         with Session() as db:
-            _seed_backup_settings(db, enabled=False, backup_path="")
+            _seed_backup_settings(db, backup_path=None)
 
         response = client.post("/backup/run")
         assert response.status_code == 400
@@ -258,7 +254,7 @@ class TestBackupRouter:
         backup_root.mkdir()
 
         with Session() as db:
-            _seed_backup_settings(db, enabled=True, backup_path="")
+            _seed_backup_settings(db, backup_path="")
 
         monkeypatch.setattr(
             backup_router,

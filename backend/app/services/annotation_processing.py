@@ -263,6 +263,82 @@ def resolve_dataset_image_by_filename(
     )
 
 
+def _flatten_polygon_coords(polygon: Any) -> Optional[List[float]]:
+    """Convert a polygon to flat COCO coords [x1, y1, x2, y2, ...]."""
+    if not isinstance(polygon, list) or len(polygon) < 3:
+        return None
+    if polygon and isinstance(polygon[0], (int, float)):
+        if len(polygon) < 6:
+            return None
+        try:
+            return [float(v) for v in polygon]
+        except (TypeError, ValueError):
+            return None
+    if polygon and isinstance(polygon[0], (list, tuple)):
+        flat: List[float] = []
+        for pt in polygon:
+            if isinstance(pt, (list, tuple)) and len(pt) >= 2:
+                try:
+                    flat.extend([float(pt[0]), float(pt[1])])
+                except (TypeError, ValueError):
+                    continue
+        return flat if len(flat) >= 6 else None
+    return None
+
+
+def segmentation_to_coco_polygons(segmentation: Any) -> List[List[float]]:
+    """
+    Normalize segmentation to COCO polygon list ``[[x1, y1, x2, y2, ...], ...]``.
+
+    Accepts flat polygons, YOLO/Ultralytics point pairs ``[[x, y], ...]``, and
+    over-wrapped exports ``[[[x, y], ...]]``.
+    """
+    if not segmentation or isinstance(segmentation, dict):
+        return []
+    if not isinstance(segmentation, list):
+        return []
+
+    work: Any = segmentation
+    while (
+        isinstance(work, list)
+        and len(work) == 1
+        and isinstance(work[0], list)
+        and work[0]
+        and isinstance(work[0][0], (list, tuple))
+        and len(work[0][0]) >= 2
+        and isinstance(work[0][0][0], (int, float))
+    ):
+        work = work[0]
+
+    polygons: List[List[float]] = []
+    if work and isinstance(work[0], (int, float)):
+        flat = _flatten_polygon_coords(work)
+        if flat:
+            polygons.append(flat)
+        return polygons
+
+    if not work or not isinstance(work[0], list):
+        return polygons
+
+    first = work[0]
+    if first and isinstance(first[0], (int, float)):
+        if len(first) >= 6:
+            for poly in work:
+                flat = _flatten_polygon_coords(poly)
+                if flat:
+                    polygons.append(flat)
+        else:
+            flat = _flatten_polygon_coords(work)
+            if flat:
+                polygons.append(flat)
+        return polygons
+
+    flat = _flatten_polygon_coords(work)
+    if flat:
+        polygons.append(flat)
+    return polygons
+
+
 def validate_and_normalize_segmentation(
     segmentation: Any,
     image_width: Optional[int] = None,
@@ -292,23 +368,20 @@ def validate_and_normalize_segmentation(
     if isinstance(segmentation, dict):
         return segmentation
     
-    # Handle list of polygons
+    # Handle list of polygons (flat COCO, point pairs, or over-wrapped YOLO exports)
     if isinstance(segmentation, list):
         validated_polygons = []
-        
-        for polygon in segmentation:
-            if not isinstance(polygon, list) or len(polygon) < 6:  # Need at least 3 points (6 values)
-                continue
-            
+
+        for flat_polygon in segmentation_to_coco_polygons(segmentation):
             validated_polygon = []
-            
+
             # Process coordinates in pairs (x, y)
-            for i in range(0, len(polygon), 2):
-                if i + 1 >= len(polygon):
+            for i in range(0, len(flat_polygon), 2):
+                if i + 1 >= len(flat_polygon):
                     break
-                
-                x = polygon[i]
-                y = polygon[i + 1]
+
+                x = flat_polygon[i]
+                y = flat_polygon[i + 1]
                 
                 # Convert to float first
                 try:

@@ -1775,12 +1775,10 @@ export class ApiClient {
 
   // Backup methods
   async getBackupSettings(): Promise<ApiResponse<{
-    enabled: boolean;
     backup_path: string | null;
-    frequency_hours: number;
+    backup_path_env?: string | null;
     retention_days: number;
     last_backup_at: string | null;
-    next_backup_at: string | null;
   }>> {
     return this.request('/backup/settings', {
       method: 'GET'
@@ -1788,9 +1786,7 @@ export class ApiClient {
   }
 
   async updateBackupSettings(settings: {
-    enabled: boolean;
     backup_path?: string | null;
-    frequency_hours: number;
     retention_days: number;
   }): Promise<ApiResponse<{
     success: boolean;

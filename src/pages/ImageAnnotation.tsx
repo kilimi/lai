@@ -112,6 +112,7 @@ import { applyClassColorsToAnnotations, resolveAnnotationDisplayColor } from '@/
 import { shouldScheduleAnnotationRedraw } from '@/utils/annotationRenderVisibility';
 import { detectSegmentationModeCapabilities } from '@/utils/annotations';
 import { downloadCocoFile, type CocoData } from '@/utils/downloadCoco';
+import { cocoSegmentationToFlatCoords } from '@/utils/cocoSegmentation';
 
 const AnnotationStatisticsCharts = lazy(
   () => import('@/components/annotation/AnnotationStatisticsCharts'),
@@ -1954,8 +1955,7 @@ const ImageAnnotation = () => {
                 // Calculate area for segmentation annotations and validate
                 let isValid = true;
                 if (annotation.segmentation && annotation.segmentation.length > 0) {
-                  const raw = annotation.segmentation;
-                  const segmentation: number[] = Array.isArray(raw[0]) ? (raw[0] as number[]) : (raw as number[]);
+                  const segmentation: number[] = cocoSegmentationToFlatCoords(annotation.segmentation);
                   if (segmentation.length >= 6) {
                     const imageDims = imageDimensions[annotation.image_id.toString()];
                     
@@ -2697,8 +2697,7 @@ const ImageAnnotation = () => {
             
             if (className && annotation.segmentation && annotation.segmentation.length > 0) {
               // COCO: segmentation is [[x1,y1,x2,y2,...]]; some exports use flat [x1,y1,x2,y2,...]
-              const raw = annotation.segmentation;
-              const segmentation: number[] = Array.isArray(raw[0]) ? (raw[0] as number[]) : (raw as number[]);
+              const segmentation: number[] = cocoSegmentationToFlatCoords(annotation.segmentation);
               if (segmentation.length >= 6) {
                 const points: Point[] = [];
                 
@@ -5934,8 +5933,7 @@ const ImageAnnotation = () => {
                         if (annotation.category_id == null) {
                           return;
                         }
-                        const raw = annotation.segmentation;
-                        const segmentation: number[] = Array.isArray(raw[0]) ? (raw[0] as number[]) : (raw as number[]);
+                        const segmentation: number[] = cocoSegmentationToFlatCoords(annotation.segmentation);
                         if (segmentation.length >= 6) {
                           const points = [];
                           

@@ -21,6 +21,7 @@ from app.database import get_db
 from app.dataset_media_paths import resolve_dataset_image_path_from_models
 from app.evaluation_artifacts import load_merged_evaluation_results
 from app.models import Dataset, Image, ImageCollection, Task
+from app.services.annotation_processing import segmentation_to_coco_polygons
 
 logger = logging.getLogger(__name__)
 
@@ -598,9 +599,7 @@ def build_thresholded_evaluation_coco_bundle(
         if not (isinstance(bbox_xywh, list) and len(bbox_xywh) >= 4):
             bbox_xyxy = _prediction_xyxy(pred)
             bbox_xywh = _xyxy_to_xywh(bbox_xyxy or [0.0, 0.0, 0.0, 0.0])
-        segmentation = pred.get("segmentation", [])
-        if segmentation and len(segmentation) > 0:
-            segmentation = [segmentation]
+        segmentation = segmentation_to_coco_polygons(pred.get("segmentation"))
         coco_output["annotations"].append(
             {
                 "id": idx,
@@ -1332,10 +1331,8 @@ async def export_all_coco_results(
                 
                 # Add predictions
                 for idx, pred in enumerate(predictions, start=1):
-                    segmentation = pred.get('segmentation', [])
-                    if segmentation and len(segmentation) > 0:
-                        segmentation = [segmentation]
-                    
+                    segmentation = segmentation_to_coco_polygons(pred.get("segmentation"))
+
                     coco_output["annotations"].append({
                         "id": idx,
                         "image_id": pred['image_id'],

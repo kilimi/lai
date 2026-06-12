@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 import logging
 import os
@@ -15,12 +15,12 @@ from ..database import get_db
 from ..services.backup_service import BackupService
 from ..services.backup_runner import (
     resolve_backup_paths,
-    is_backup_configured,
     is_backup_path_configured,
     has_in_progress_backup,
     run_backup,
     run_restore,
 )
+from ..task_dispatch import use_celery_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -28,9 +28,7 @@ router = APIRouter()
 
 
 class BackupSettingsRequest(BaseModel):
-    enabled: bool
     backup_path: Optional[str] = None
-    frequency_hours: int = 24
     retention_days: int = 30
 
 
@@ -40,11 +38,8 @@ class RestoreRequest(BaseModel):
     confirm: str
 
 
-@router.get("/backup/settings")
-async def get_backup_settings(db: Session = Depends(get_db)):
-    """Get current backup settings"""
+def _ensure_backup_settings(db: Session) -> models.BackupSettings:
     settings = db.query(models.BackupSettings).first()
-
     if not settings:
         settings = models.BackupSettings(
             enabled=False,
@@ -55,17 +50,20 @@ async def get_backup_settings(db: Session = Depends(get_db)):
         db.add(settings)
         db.commit()
         db.refresh(settings)
+    return settings
 
+
+@router.get("/backup/settings")
+async def get_backup_settings(db: Session = Depends(get_db)):
+    """Get current backup settings"""
+    settings = _ensure_backup_settings(db)
     backup_path_env = os.environ.get("BACKUP_PATH", None)
 
     return {
-        "enabled": settings.enabled,
         "backup_path": settings.backup_path if settings.backup_path is not None else "",
         "backup_path_env": backup_path_env,
-        "frequency_hours": settings.frequency_hours,
         "retention_days": settings.retention_days,
         "last_backup_at": settings.last_backup_at.isoformat() if settings.last_backup_at else None,
-        "next_backup_at": settings.next_backup_at.isoformat() if settings.next_backup_at else None,
     }
 
 
@@ -74,15 +72,8 @@ async def update_backup_settings(
     request: BackupSettingsRequest,
     db: Session = Depends(get_db),
 ):
-    """Update backup settings"""
-    settings = db.query(models.BackupSettings).first()
-
-    if not settings:
-        settings = models.BackupSettings()
-        db.add(settings)
-
-    settings.enabled = request.enabled
-    settings.frequency_hours = request.frequency_hours
+    """Update backup settings (path and retention; backups are manual only)."""
+    settings = _ensure_backup_settings(db)
     settings.retention_days = request.retention_days
 
     if request.backup_path is not None:
@@ -104,15 +95,6 @@ async def update_backup_settings(
                 ),
             )
 
-    if settings.enabled and settings.last_backup_at:
-        settings.next_backup_at = settings.last_backup_at + timedelta(
-            hours=settings.frequency_hours
-        )
-    elif settings.enabled:
-        settings.next_backup_at = datetime.utcnow() + timedelta(
-            hours=settings.frequency_hours
-        )
-
     settings.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(settings)
@@ -121,15 +103,22 @@ async def update_backup_settings(
         "success": True,
         "message": "Backup settings updated",
         "settings": {
-            "enabled": settings.enabled,
             "backup_path": settings.backup_path,
-            "frequency_hours": settings.frequency_hours,
             "retention_days": settings.retention_days,
-            "next_backup_at": settings.next_backup_at.isoformat()
-            if settings.next_backup_at
+            "last_backup_at": settings.last_backup_at.isoformat()
+            if settings.last_backup_at
             else None,
         },
     }
+
+
+def _dispatch_manual_backup(settings_id: int, background_tasks: BackgroundTasks) -> None:
+    if use_celery_enabled():
+        from app.tasks.backup_tasks import run_manual_backup
+
+        run_manual_backup.delay(settings_id)
+        return
+    background_tasks.add_task(run_backup, settings_id)
 
 
 @router.post("/backup/run")
@@ -138,12 +127,12 @@ async def trigger_backup(
     db: Session = Depends(get_db),
 ):
     """Manually trigger a backup"""
-    settings = db.query(models.BackupSettings).first()
+    settings = _ensure_backup_settings(db)
 
-    if not is_backup_configured(settings):
+    if not is_backup_path_configured(settings):
         raise HTTPException(
             status_code=400,
-            detail="Backup is not enabled. Please configure backup settings first.",
+            detail="Backup path is not configured. Save backup settings first.",
         )
 
     if has_in_progress_backup(db):
@@ -152,7 +141,7 @@ async def trigger_backup(
             detail="A backup is already in progress",
         )
 
-    background_tasks.add_task(run_backup, settings.id)
+    _dispatch_manual_backup(settings.id, background_tasks)
 
     return {
         "success": True,
@@ -243,7 +232,7 @@ async def restore_backup(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
-    """Restore from an auto-backup snapshot"""
+    """Restore from a backup snapshot"""
     if request.confirm != "RESTORE":
         raise HTTPException(
             status_code=400,

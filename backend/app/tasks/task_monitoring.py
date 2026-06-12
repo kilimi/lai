@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict
 
 from sqlalchemy import create_engine
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 
 from app.celery.general_app import celery_app
@@ -18,8 +19,25 @@ logger = logging.getLogger(__name__)
 
 # Database setup for Celery workers
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://postgres:postgres@db/lai_db")
-engine = create_engine(DATABASE_URL)
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True,
+    connect_args={"connect_timeout": 10},
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
+def _is_transient_db_error(exc: BaseException) -> bool:
+    """True when Postgres is restarting or briefly unreachable."""
+    message = str(getattr(exc, "orig", exc)).lower()
+    markers = (
+        "the database system is starting up",
+        "could not connect to server",
+        "connection refused",
+        "server closed the connection unexpectedly",
+        "timeout expired",
+    )
+    return any(marker in message for marker in markers)
 
 
 def _parse_iso_dt(value: Any) -> datetime | None:
@@ -134,6 +152,20 @@ def auto_cancel_stale_tasks() -> Dict[str, Any]:
             "errors": errors,
             "timeout_hours": timeout_hours,
         }
+    except OperationalError as e:
+        db.rollback()
+        if _is_transient_db_error(e):
+            logger.warning(
+                "Task monitor skipped: database unavailable (%s)",
+                getattr(e, "orig", e),
+            )
+            return {
+                "success": False,
+                "skipped": True,
+                "reason": "database_unavailable",
+            }
+        logger.error("Task monitor failed: %s", e, exc_info=True)
+        raise
     except Exception as e:
         db.rollback()
         logger.error("Task monitor failed: %s", e, exc_info=True)

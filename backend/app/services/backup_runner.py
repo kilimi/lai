@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Optional, Tuple
 
@@ -54,8 +54,8 @@ def is_backup_path_configured(settings: models.BackupSettings) -> bool:
 
 
 def is_backup_configured(settings: models.BackupSettings) -> bool:
-    """True when backups are enabled and path is configured."""
-    return bool(settings and settings.enabled and is_backup_path_configured(settings))
+    """True when backup path is configured (manual backups only)."""
+    return is_backup_path_configured(settings)
 
 
 def get_projects_dir() -> Path:
@@ -188,11 +188,6 @@ def run_backup(settings_id: int) -> BackupResult:
             logger.info(f"  - Location: {backup_path}")
 
             settings.last_backup_at = datetime.utcnow()
-            if settings.enabled:
-                settings.next_backup_at = settings.last_backup_at + timedelta(
-                    hours=settings.frequency_hours
-                )
-
             db.commit()
 
             return BackupResult(

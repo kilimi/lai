@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app import models
 from app.database import SessionLocal
+from app.services.annotation_processing import segmentation_to_coco_polygons
 from app.task_dispatch import ensure_inline_dispatch_allowed, use_celery_enabled
 logger = logging.getLogger(__name__)
 
@@ -933,20 +934,9 @@ async def get_dataset_annotation_content(
                             # RLE payload
                             coco_ann["segmentation"] = seg_raw
                         elif isinstance(seg_raw, list):
-                            first = seg_raw[0] if len(seg_raw) > 0 else None
-                            if isinstance(first, (int, float)):
-                                # Flat polygon -> wrap once for COCO polygon format
-                                if len(seg_raw) >= 6:
-                                    coco_ann["segmentation"] = [seg_raw]
-                            else:
-                                # Already polygon list; keep only valid polygons
-                                valid_polys = [
-                                    poly
-                                    for poly in seg_raw
-                                    if isinstance(poly, list) and len(poly) >= 6
-                                ]
-                                if valid_polys:
-                                    coco_ann["segmentation"] = valid_polys
+                            valid_polys = segmentation_to_coco_polygons(seg_raw)
+                            if valid_polys:
+                                coco_ann["segmentation"] = valid_polys
 
                     # Handle bbox — API rows are normalized 0–1; COCO JSON uses pixels
                     if ann.get("bbox") and len(ann["bbox"]) == 4:

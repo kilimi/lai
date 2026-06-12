@@ -17,7 +17,6 @@ import {
   Zap,
   ExternalLink,
   Save,
-  Clock,
   FolderOpen,
   Play,
   Info,
@@ -39,7 +38,6 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { DatabaseManager } from "@/components/DatabaseManager";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { Checkbox } from "@/components/ui/checkbox";
 
@@ -54,14 +52,11 @@ export const ApiSettings = () => {
   const [showDatasetsDialog, setShowDatasetsDialog] = useState(false);
   
   // Backup settings state
-  const [backupEnabled, setBackupEnabled] = useState(false);
   const [backupPath, setBackupPath] = useState("");
   const [backupPathEnv, setBackupPathEnv] = useState<string | null>(null);
   const [copiedText, setCopiedText] = useState<string | null>(null);
-  const [frequencyHours, setFrequencyHours] = useState(24);
   const [retentionDays, setRetentionDays] = useState(30);
   const [lastBackupAt, setLastBackupAt] = useState<string | null>(null);
-  const [nextBackupAt, setNextBackupAt] = useState<string | null>(null);
   const [isLoadingBackupSettings, setIsLoadingBackupSettings] = useState(false);
   const [isSavingBackupSettings, setIsSavingBackupSettings] = useState(false);
   const [isRunningBackup, setIsRunningBackup] = useState(false);
@@ -150,13 +145,10 @@ export const ApiSettings = () => {
       });
       
       if (response.success && response.data) {
-        setBackupEnabled(response.data.enabled || false);
         setBackupPath(response.data.backup_path || "");
         setBackupPathEnv(response.data.backup_path_env || null);
-        setFrequencyHours(response.data.frequency_hours || 24);
         setRetentionDays(response.data.retention_days || 30);
         setLastBackupAt(response.data.last_backup_at || null);
-        setNextBackupAt(response.data.next_backup_at || null);
       }
     } catch (error) {
       console.error('Failed to load backup settings:', error);
@@ -187,9 +179,7 @@ export const ApiSettings = () => {
       const response = await apiClient.request<any>('/backup/settings', {
         method: 'POST',
         body: JSON.stringify({
-          enabled: backupEnabled,
           backup_path: backupPath,
-          frequency_hours: frequencyHours,
           retention_days: retentionDays,
         }),
       });
@@ -593,7 +583,7 @@ export const ApiSettings = () => {
               </CardContent>
             </Card>
 
-            {/* Automatic Backup Settings */}
+            {/* Manual Backup */}
             <Card className="border-2 shadow-lg overflow-hidden">
               <CardHeader className="bg-gradient-to-r from-emerald-500/5 to-transparent border-b">
                 <div className="flex items-center gap-3">
@@ -601,43 +591,15 @@ export const ApiSettings = () => {
                     <HardDrive className="h-5 w-5 text-emerald-500" />
                   </div>
                   <div>
-                    <CardTitle className="text-xl">Automatic Backup</CardTitle>
+                    <CardTitle className="text-xl">Backup</CardTitle>
                     <CardDescription className="text-base">
-                      Configure automatic incremental backups (ZFS-like snapshots)
+                      Manual incremental snapshots of the database and project files
                     </CardDescription>
                   </div>
                 </div>
               </CardHeader>
               <CardContent className="p-6 space-y-6">
-                {/* Enable/Disable Backup */}
-                <div className="flex items-center justify-between p-4 rounded-xl border-2 bg-muted/20">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 rounded-lg bg-primary/10">
-                      <Zap className="h-4 w-4 text-primary" />
-                    </div>
-                    <div>
-                      <Label htmlFor="backup-enabled" className="text-base font-medium cursor-pointer">
-                        Enable Automatic Backups
-                      </Label>
-                      <p className="text-sm text-muted-foreground">
-                        Automatically backup database and files at configured intervals
-                      </p>
-                    </div>
-                  </div>
-                  <Switch
-                    id="backup-enabled"
-                    checked={backupEnabled}
-                    onCheckedChange={setBackupEnabled}
-                    disabled={isLoadingBackupSettings}
-                  />
-                </div>
-
-                {backupEnabled && (
-                  <>
-                    <Separator />
-                    
-                    {/* Backup Path Configuration */}
-                    <div className="space-y-4">
+                <div className="space-y-4">
                       {/* Current BACKUP_PATH Environment Variable */}
                       {backupPathEnv && (
                         <div className="p-4 rounded-xl border-2 bg-emerald-500/5 border-emerald-500/20">
@@ -787,30 +749,9 @@ export const ApiSettings = () => {
                           </div>
                         </div>
                       )}
-                    </div>
+                </div>
 
-                    {/* Frequency */}
-                    <div className="space-y-3">
-                      <Label htmlFor="frequency-hours" className="text-sm font-medium flex items-center gap-2">
-                        <Clock className="h-4 w-4 text-primary" />
-                        Backup Frequency (hours)
-                      </Label>
-                      <Input
-                        id="frequency-hours"
-                        type="number"
-                        min="1"
-                        max="168"
-                        value={frequencyHours}
-                        onChange={(e) => setFrequencyHours(parseInt(e.target.value) || 24)}
-                        className="h-12 bg-muted/30 border-2 focus:border-primary/50"
-                        disabled={isLoadingBackupSettings}
-                      />
-                      <p className="text-sm text-muted-foreground">
-                        How often to create a new backup (1-168 hours, e.g., 24 = daily)
-                      </p>
-                    </div>
-
-                    {/* Retention */}
+                {/* Retention */}
                     <div className="space-y-3">
                       <Label htmlFor="retention-days" className="text-sm font-medium flex items-center gap-2">
                         <Database className="h-4 w-4 text-primary" />
@@ -826,51 +767,39 @@ export const ApiSettings = () => {
                         disabled={isLoadingBackupSettings}
                       />
                       <p className="text-sm text-muted-foreground">
-                        How many days to keep backups before automatic deletion
+                        How many days to keep snapshots before old ones are deleted
                       </p>
                     </div>
 
-                    {/* Backup Status */}
-                    {(lastBackupAt || nextBackupAt) && (
-                      <div className="p-4 rounded-xl border-2 bg-muted/20 space-y-2">
-                        <p className="text-sm font-medium">Backup Status</p>
-                        {lastBackupAt && (
-                          <p className="text-sm text-muted-foreground">
-                            Last backup: {new Date(lastBackupAt).toLocaleString()}
-                          </p>
-                        )}
-                        {nextBackupAt && (
-                          <p className="text-sm text-muted-foreground">
-                            Next backup: {new Date(nextBackupAt).toLocaleString()}
-                          </p>
-                        )}
-                      </div>
-                    )}
-
-                    <Separator />
-
-                    {/* Actions */}
-                    <div className="flex gap-3">
-                      <Button
-                        onClick={saveBackupSettings}
-                        disabled={isSavingBackupSettings || isLoadingBackupSettings}
-                        className="flex-1"
-                      >
-                        <Save className="h-4 w-4 mr-2" />
-                        {isSavingBackupSettings ? "Saving..." : "Save Settings"}
-                      </Button>
-                      <Button
-                        onClick={runBackup}
-                        disabled={isRunningBackup || !backupEnabled}
-                        variant="outline"
-                        className="flex-1"
-                      >
-                        <Play className="h-4 w-4 mr-2" />
-                        {isRunningBackup ? "Running..." : "Run Backup Now"}
-                      </Button>
-                    </div>
-                  </>
+                {lastBackupAt && (
+                  <div className="p-4 rounded-xl border-2 bg-muted/20">
+                    <p className="text-sm text-muted-foreground">
+                      Last backup: {new Date(lastBackupAt).toLocaleString()}
+                    </p>
+                  </div>
                 )}
+
+                <Separator />
+
+                <div className="flex gap-3">
+                  <Button
+                    onClick={saveBackupSettings}
+                    disabled={isSavingBackupSettings || isLoadingBackupSettings}
+                    className="flex-1"
+                  >
+                    <Save className="h-4 w-4 mr-2" />
+                    {isSavingBackupSettings ? "Saving..." : "Save Settings"}
+                  </Button>
+                  <Button
+                    onClick={runBackup}
+                    disabled={isRunningBackup || isLoadingBackupSettings}
+                    variant="outline"
+                    className="flex-1"
+                  >
+                    <Play className="h-4 w-4 mr-2" />
+                    {isRunningBackup ? "Running..." : "Run Backup"}
+                  </Button>
+                </div>
 
                 {/* Backup List */}
                 {backups.length > 0 && (
