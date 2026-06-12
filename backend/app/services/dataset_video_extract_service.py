@@ -42,6 +42,9 @@ async def extract_frames_from_video_service(
     collection_id: Optional[int], sequential_names: bool,
     resize_width: int, resize_height: int,
 ) -> dict:
+    def _progress(**fields) -> None:
+        video_progress_set(job_id, **fields)
+
     try:
         dataset = db.query(models.Dataset).filter(models.Dataset.id == dataset_id).first()
         if not dataset:
