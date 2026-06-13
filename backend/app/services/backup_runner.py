@@ -5,7 +5,8 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
+import json
 from pathlib import Path, PurePosixPath
 from typing import Optional, Tuple
 
@@ -54,8 +55,35 @@ def is_backup_path_configured(settings: models.BackupSettings) -> bool:
 
 
 def is_backup_configured(settings: models.BackupSettings) -> bool:
-    """True when backup path is configured (manual backups only)."""
+    """True when backup path is configured."""
     return is_backup_path_configured(settings)
+
+
+def is_automatic_backup_enabled(settings: models.BackupSettings) -> bool:
+    return bool(settings and settings.enabled and is_backup_path_configured(settings))
+
+
+def compute_next_backup_at(
+    settings: models.BackupSettings,
+    *,
+    from_time: Optional[datetime] = None,
+) -> datetime:
+    """Next scheduled run after a successful backup (or when enabling auto-backup)."""
+    hours = max(1, int(settings.frequency_hours or 24))
+    base = from_time or settings.last_backup_at or datetime.utcnow()
+    return base + timedelta(hours=hours)
+
+
+def is_automatic_backup_due(
+    settings: models.BackupSettings,
+    now: Optional[datetime] = None,
+) -> bool:
+    if not is_automatic_backup_enabled(settings):
+        return False
+    now = now or datetime.utcnow()
+    if settings.next_backup_at is None:
+        return True
+    return now >= settings.next_backup_at
 
 
 def get_projects_dir() -> Path:
@@ -82,7 +110,29 @@ class BackupResult:
     error: Optional[str] = None
 
 
-def _compute_backup_status(files_ok: bool, db_ok: bool) -> str:
+def _ensure_backup_metadata_file(
+    backup_path: Path,
+    backup_name: str,
+    *,
+    parent_backup_path: Optional[Path] = None,
+    stats: Optional[dict] = None,
+) -> None:
+    """Write .backup_metadata.json so list_backups can find DB-only snapshots."""
+    metadata_file = backup_path / ".backup_metadata.json"
+    if metadata_file.exists():
+        return
+    backup_path.mkdir(parents=True, exist_ok=True)
+    with open(metadata_file, "w", encoding="utf-8") as f:
+        json.dump(
+            {
+                "backup_name": backup_name,
+                "created_at": datetime.utcnow().isoformat(),
+                "parent_backup": str(parent_backup_path) if parent_backup_path else None,
+                "stats": stats or {},
+            },
+            f,
+            indent=2,
+        )
     if files_ok and db_ok:
         return "completed"
     if files_ok or db_ok:
@@ -141,6 +191,7 @@ def run_backup(settings_id: int) -> BackupResult:
         try:
             projects_dir = get_projects_dir()
             files_ok = False
+            file_stats: dict = {}
             if projects_dir.exists():
                 _, file_stats = backup_service.create_incremental_backup(
                     projects_dir,
@@ -153,6 +204,11 @@ def run_backup(settings_id: int) -> BackupResult:
             else:
                 backup_record.files_backed_up = False
                 logger.warning("Projects directory not found")
+                _ensure_backup_metadata_file(
+                    backup_path,
+                    backup_name,
+                    parent_backup_path=parent_backup_path,
+                )
 
             logger.info(f"Starting database backup to: {backup_path}")
             db_ok = backup_service.backup_database(SQLALCHEMY_DATABASE_URL, backup_path)
@@ -188,6 +244,10 @@ def run_backup(settings_id: int) -> BackupResult:
             logger.info(f"  - Location: {backup_path}")
 
             settings.last_backup_at = datetime.utcnow()
+            if settings.enabled:
+                settings.next_backup_at = compute_next_backup_at(
+                    settings, from_time=settings.last_backup_at
+                )
             db.commit()
 
             return BackupResult(

@@ -562,20 +562,20 @@ def create_augmented_dataset_task(self, task_id: int):
 
         # Ensure target dataset has a default image collection so tabbed UI can display
         # images while augmentation is still running.
-        target_default_collection = db.query(ImageCollection).filter(
-            ImageCollection.dataset_id == target_dataset.id,
-            ImageCollection.is_default == True
-        ).first()
-        if not target_default_collection:
-            target_default_collection = ImageCollection(
-                dataset_id=target_dataset.id,
-                name="RGB Images",
-                description="Default image collection",
-                is_default=True,
-                position=0,
+        from app.services.dataset_collections_service import ensure_default_image_collection
+
+        target_default_collection = (
+            db.query(ImageCollection)
+            .filter(
+                ImageCollection.dataset_id == target_dataset.id,
+                ImageCollection.is_default == True,
             )
-            db.add(target_default_collection)
-            db.flush()
+            .first()
+        )
+        if not target_default_collection:
+            target_default_collection = ensure_default_image_collection(
+                db, target_dataset.id, description="Default image collection"
+            )
             logger.info(
                 f"Task {task_id}: Created default collection {target_default_collection.id} for dataset {target_dataset.id}"
             )

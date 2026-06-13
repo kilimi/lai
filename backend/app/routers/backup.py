@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 import logging
 import os
@@ -17,10 +17,11 @@ from ..services.backup_runner import (
     resolve_backup_paths,
     is_backup_path_configured,
     has_in_progress_backup,
+    compute_next_backup_at,
     run_backup,
     run_restore,
 )
-from ..task_dispatch import use_celery_enabled
+from ..task_dispatch import ensure_inline_dispatch_allowed, use_celery_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,8 @@ router = APIRouter()
 class BackupSettingsRequest(BaseModel):
     backup_path: Optional[str] = None
     retention_days: int = 30
+    enabled: Optional[bool] = None
+    frequency_hours: Optional[int] = None
 
 
 class RestoreRequest(BaseModel):
@@ -62,8 +65,11 @@ async def get_backup_settings(db: Session = Depends(get_db)):
     return {
         "backup_path": settings.backup_path if settings.backup_path is not None else "",
         "backup_path_env": backup_path_env,
+        "enabled": bool(settings.enabled),
+        "frequency_hours": settings.frequency_hours,
         "retention_days": settings.retention_days,
         "last_backup_at": settings.last_backup_at.isoformat() if settings.last_backup_at else None,
+        "next_backup_at": settings.next_backup_at.isoformat() if settings.next_backup_at else None,
     }
 
 
@@ -72,9 +78,26 @@ async def update_backup_settings(
     request: BackupSettingsRequest,
     db: Session = Depends(get_db),
 ):
-    """Update backup settings (path and retention; backups are manual only)."""
+    """Update backup settings (path, schedule, retention)."""
     settings = _ensure_backup_settings(db)
     settings.retention_days = request.retention_days
+
+    if request.frequency_hours is not None:
+        freq = max(1, int(request.frequency_hours))
+        settings.frequency_hours = freq
+        if settings.enabled:
+            base = settings.last_backup_at or datetime.utcnow()
+            settings.next_backup_at = base + timedelta(hours=freq)
+
+    if request.enabled is not None:
+        was_enabled = bool(settings.enabled)
+        settings.enabled = request.enabled
+        if request.enabled and not was_enabled:
+            settings.next_backup_at = datetime.utcnow()
+        elif not request.enabled:
+            settings.next_backup_at = None
+        elif request.enabled and settings.next_backup_at is None:
+            settings.next_backup_at = compute_next_backup_at(settings)
 
     if request.backup_path is not None:
         backup_path_input = request.backup_path.strip() if request.backup_path else ""
@@ -104,9 +127,14 @@ async def update_backup_settings(
         "message": "Backup settings updated",
         "settings": {
             "backup_path": settings.backup_path,
+            "enabled": bool(settings.enabled),
+            "frequency_hours": settings.frequency_hours,
             "retention_days": settings.retention_days,
             "last_backup_at": settings.last_backup_at.isoformat()
             if settings.last_backup_at
+            else None,
+            "next_backup_at": settings.next_backup_at.isoformat()
+            if settings.next_backup_at
             else None,
         },
     }
@@ -182,12 +210,22 @@ async def list_backups(db: Session = Depends(get_db)):
         entry["database_backed_up"] = record.database_backed_up
         entry["files_backed_up"] = record.files_backed_up
         entry["backup_type"] = record.backup_type
+        if record.started_at:
+            entry["started_at"] = record.started_at.isoformat()
+            entry["created_at"] = entry.get("created_at") or record.started_at.isoformat()
+        if record.completed_at:
+            entry["completed_at"] = record.completed_at.isoformat()
         if record.backup_metadata:
             entry["backup_metadata"] = record.backup_metadata
 
+    def _sort_key(item: dict) -> str:
+        return item.get("created_at") or item.get("started_at") or item.get("backup_path") or ""
+
+    sorted_backups = sorted(backup_map.values(), key=_sort_key, reverse=True)
+
     return {
-        "backups": list(backup_map.values()),
-        "total": len(backup_map),
+        "backups": sorted_backups,
+        "total": len(sorted_backups),
     }
 
 
@@ -272,12 +310,22 @@ async def restore_backup(
         request.restore_files,
     )
 
-    background_tasks.add_task(
-        run_restore,
-        backup_id,
-        restore_database=request.restore_database,
-        restore_files=request.restore_files,
-    )
+    if use_celery_enabled():
+        from app.tasks.backup_tasks import run_restore_backup
+
+        run_restore_backup.delay(
+            backup_id,
+            restore_database=request.restore_database,
+            restore_files=request.restore_files,
+        )
+    else:
+        ensure_inline_dispatch_allowed("Backup restore")
+        background_tasks.add_task(
+            run_restore,
+            backup_id,
+            restore_database=request.restore_database,
+            restore_files=request.restore_files,
+        )
 
     return {
         "success": True,

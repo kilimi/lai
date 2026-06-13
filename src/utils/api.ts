@@ -2,6 +2,33 @@ import { ApiConfig, ApiResponse } from '@/types/api';
 import { Dataset, Project, Image, ImageCollection } from '@/types';
 import { normalizeImageMedia } from '@/config/api';
 
+function buildDatabaseExportUrl(
+  baseUrl: string,
+  path: string,
+  projectIds?: number[],
+  datasetIds?: number[],
+): string {
+  const params = new URLSearchParams();
+  if (projectIds && projectIds.length > 0) {
+    params.set('project_ids', projectIds.join(','));
+  }
+  if (datasetIds && datasetIds.length > 0) {
+    params.set('dataset_ids', datasetIds.join(','));
+  }
+  const queryString = params.toString();
+  return `${baseUrl}${path}${queryString ? `?${queryString}` : ''}`;
+}
+
+/** Let the browser download directly to disk (avoids loading multi-GB ZIP into JS memory). */
+function triggerBrowserFileDownload(url: string): void {
+  const iframe = document.createElement('iframe');
+  iframe.style.display = 'none';
+  iframe.setAttribute('aria-hidden', 'true');
+  iframe.src = url;
+  document.body.appendChild(iframe);
+  window.setTimeout(() => iframe.remove(), 120_000);
+}
+
 /**
  * Simple API client for interacting with FastAPI backend
  */
@@ -1249,6 +1276,25 @@ export class ApiClient {
     return this.request('/projects/names-only');
   }
 
+  async startDatabaseExport(body: {
+    include_files: boolean;
+    project_ids?: number[];
+    dataset_ids?: number[];
+    task_name?: string;
+  }): Promise<ApiResponse<{ task_id: number; name: string; status: string }> & {
+    task_id?: number;
+    message?: string;
+  }> {
+    return this.request('/database/export/start', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  getDatabaseExportDownloadUrl(taskId: number): string {
+    return `${this.config.baseUrl}/database/export/download/${taskId}`;
+  }
+
   async exportDatabase(
     onProgress?: (progress: number) => void, 
     projectIds?: number[], 
@@ -1268,6 +1314,10 @@ export class ApiClient {
       const queryString = params.toString();
       const url = `${this.config.baseUrl}/database/export${queryString ? `?${queryString}` : ''}`;
       
+      if (onProgress) {
+        onProgress(2);
+      }
+
       const response = await fetch(url, {
         method: 'GET',
         headers: {
@@ -1278,6 +1328,10 @@ export class ApiClient {
 
       if (!response.ok) {
         throw new Error(`Export failed: ${response.status} ${response.statusText}`);
+      }
+
+      if (onProgress) {
+        onProgress(10);
       }
 
       // Track progress while reading the response
@@ -1292,14 +1346,7 @@ export class ApiClient {
       const totalLength = contentLength ? parseInt(contentLength, 10) : 0;
       const chunks: Uint8Array[] = [];
 
-      // For smooth progress updates
-      let lastProgressUpdate = 0;
-
-      // Show initial progress immediately
-      if (onProgress) {
-        onProgress(1);
-        lastProgressUpdate = 1;
-      }
+      let lastProgressUpdate = 10;
 
       while (true) {
         // Check if cancelled
@@ -1316,15 +1363,12 @@ export class ApiClient {
         receivedLength += value.length;
         
         if (onProgress && totalLength > 0) {
-          const progress = Math.min(95, Math.round((receivedLength / totalLength) * 100));
-          // Update whenever progress increases
+          const progress = Math.min(95, 10 + Math.round((receivedLength / totalLength) * 85));
           if (progress > lastProgressUpdate) {
             onProgress(progress);
             lastProgressUpdate = progress;
           }
         } else if (onProgress && totalLength === 0) {
-          // For streaming without content-length, show steady incremental progress
-          // Use logarithmic scale: grows fast initially, then slows down
           const streamingProgress = Math.min(90, 10 + Math.floor(Math.log(receivedLength + 1) * 8));
           if (streamingProgress > lastProgressUpdate) {
             onProgress(streamingProgress);
@@ -1338,30 +1382,9 @@ export class ApiClient {
         throw new Error('Export cancelled by user');
       }
 
-      // Processing stage - show progress
       if (onProgress) onProgress(96);
 
-      // Create blob directly from chunks (more efficient than combining into one array)
       const blob = new Blob(chunks as BlobPart[], { type: 'application/json' });
-
-      // Streaming export has no Content-Length; verify JSON before saving a broken backup.
-      if (receivedLength > 0 && receivedLength <= 100 * 1024 * 1024) {
-        const text = await blob.text();
-        if (!text.trimEnd().endsWith('}}')) {
-          throw new Error(
-            'Export file appears incomplete (JSON does not end with }}). ' +
-            'Try "Export with files" (ZIP) or export fewer projects/datasets.'
-          );
-        }
-        try {
-          JSON.parse(text);
-        } catch (parseError) {
-          const msg = parseError instanceof Error ? parseError.message : String(parseError);
-          throw new Error(
-            `Export produced invalid JSON (${msg}). Do not import this file — re-export or use the ZIP archive.`
-          );
-        }
-      }
       
       if (onProgress) onProgress(97);
 
@@ -1623,126 +1646,23 @@ export class ApiClient {
   }
 
   async exportDatabaseWithFiles(
-    onProgress?: (progress: number) => void, 
-    projectIds?: number[], 
+    onProgress?: (progress: number) => void,
+    projectIds?: number[],
     datasetIds?: number[],
-    abortSignal?: AbortSignal
+    _abortSignal?: AbortSignal,
   ): Promise<void> {
-    try {
-      // Build URL with query parameters
-      const params = new URLSearchParams();
-      if (projectIds && projectIds.length > 0) {
-        params.append('project_ids', projectIds.join(','));
-      }
-      if (datasetIds && datasetIds.length > 0) {
-        params.append('dataset_ids', datasetIds.join(','));
-      }
-      
-      const queryString = params.toString();
-      const url = `${this.config.baseUrl}/database/export-with-files${queryString ? `?${queryString}` : ''}`;
-      
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'Accept': 'application/zip',
-        },
-        signal: abortSignal,
-      });
-
-      if (!response.ok) {
-        throw new Error(`Export failed: ${response.status} ${response.statusText}`);
-      }
-
-      // Track progress while reading the response
-      const reader = response.body?.getReader();
-      const contentLength = response.headers.get('Content-Length');
-      
-      if (!reader) {
-        throw new Error('Failed to read response');
-      }
-
-      let receivedLength = 0;
-      const totalLength = contentLength ? parseInt(contentLength, 10) : 0;
-      const chunks: Uint8Array[] = [];
-
-      // For smooth progress updates
-      let lastProgressUpdate = 0;
-
-      // Show initial progress immediately
-      if (onProgress) {
-        onProgress(1);
-        lastProgressUpdate = 1;
-      }
-
-      while (true) {
-        // Check if cancelled
-        if (abortSignal?.aborted) {
-          reader.cancel();
-          throw new Error('Export cancelled by user');
-        }
-        
-        const { done, value } = await reader.read();
-        
-        if (done) break;
-        
-        chunks.push(value);
-        receivedLength += value.length;
-        
-        if (onProgress && totalLength > 0) {
-          const progress = Math.min(95, Math.round((receivedLength / totalLength) * 100));
-          // Update whenever progress increases
-          if (progress > lastProgressUpdate) {
-            onProgress(progress);
-            lastProgressUpdate = progress;
-          }
-        } else if (onProgress && totalLength === 0) {
-          // For streaming without content-length, show steady incremental progress
-          // Use logarithmic scale: grows fast initially, then slows down
-          const streamingProgress = Math.min(90, 10 + Math.floor(Math.log(receivedLength + 1) * 8));
-          if (streamingProgress > lastProgressUpdate) {
-            onProgress(streamingProgress);
-            lastProgressUpdate = streamingProgress;
-          }
-        }
-      }
-
-      // Check if cancelled before processing
-      if (abortSignal?.aborted) {
-        throw new Error('Export cancelled by user');
-      }
-
-      // Processing stage - show progress
-      if (onProgress) onProgress(96);
-
-      // Create blob directly from chunks (more efficient than combining into one array)
-      const blob = new Blob(chunks as BlobPart[], { type: 'application/zip' });
-      
-      if (onProgress) onProgress(97);
-
-      // Get filename from response headers or use default
-      const contentDisposition = response.headers.get('Content-Disposition');
-      const filename = contentDisposition?.match(/filename="?([^"]+)"?/)?.[1] || 
-                     `lai_full_backup_${new Date().toISOString().slice(0, 19).replace(/[:.]/g, '-')}.zip`;
-      
-      if (onProgress) onProgress(98);
-
-      // Create download link
-      const downloadUrl = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = downloadUrl;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(downloadUrl);
-      
-      if (onProgress) onProgress(100);
-    } catch (error) {
-      // Don't throw error if it was cancelled
-      if (error instanceof Error && error.name === 'AbortError') {
-        throw new Error('Export cancelled by user');
-      }
-      throw new Error(`Database export with files failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    const url = buildDatabaseExportUrl(
+      this.config.baseUrl,
+      '/database/export-with-files',
+      projectIds,
+      datasetIds,
+    );
+    if (onProgress) {
+      onProgress(5);
+    }
+    triggerBrowserFileDownload(url);
+    if (onProgress) {
+      onProgress(100);
     }
   }
 

@@ -15,6 +15,7 @@ import numpy as np
 
 from ..database import get_db
 from ..http_utils import public_request_base_url
+from app.services.dataset_collections_service import ensure_default_image_collection
 from ..models import ImageCollection, Image, Dataset
 from ..schemas import (
     ImageCollectionCreate, 
@@ -103,12 +104,21 @@ def get_image_collections(request: Request, dataset_id: int, db: Session = Depen
     
     base_url = public_request_base_url(request)
 
-    # Default collection (if any) — used to attach orphan images with collection_id NULL.
-    # We do NOT auto-create a collection here; the UI requires an explicit layer before upload.
-    default_collection = db.query(ImageCollection).filter(
-        ImageCollection.dataset_id == dataset_id,
-        ImageCollection.is_default == True
-    ).first()
+    collections = db.query(ImageCollection).filter(
+        ImageCollection.dataset_id == dataset_id
+    ).order_by(ImageCollection.position.asc(), ImageCollection.created_at.asc()).all()
+
+    if not collections:
+        ensure_default_image_collection(db, dataset_id)
+        db.commit()
+        collections = db.query(ImageCollection).filter(
+            ImageCollection.dataset_id == dataset_id
+        ).order_by(ImageCollection.position.asc(), ImageCollection.created_at.asc()).all()
+
+    # Default collection — attach orphan images with collection_id NULL.
+    default_collection = next((c for c in collections if c.is_default), None)
+    if default_collection is None and collections:
+        default_collection = collections[0]
 
     if default_collection:
         updated_count = (
@@ -118,10 +128,6 @@ def get_image_collections(request: Request, dataset_id: int, db: Session = Depen
         )
         if updated_count:
             db.commit()
-
-    collections = db.query(ImageCollection).filter(
-        ImageCollection.dataset_id == dataset_id
-    ).order_by(ImageCollection.position.asc(), ImageCollection.created_at.asc()).all()
 
     default_collection_id = default_collection.id if default_collection else None
 

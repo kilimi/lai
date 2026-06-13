@@ -149,11 +149,18 @@ def cmd_pull(ns: argparse.Namespace) -> int:
 
 
 def cmd_upgrade(ns: argparse.Namespace) -> int:
-    root = get_bundle_root(force_download=ns.refresh)
-    _hint_guided_install(root)
-    if _candidate_repo_root() is None:
-        get_bundle_root(force_download=True)
+    if ns.refresh and _candidate_repo_root() is None:
+        root = get_bundle_root(force_download=True)
         print(f"Bundle refreshed under {bundle_data_dir()}", file=sys.stderr)
+    else:
+        root = get_bundle_root(force_download=False)
+    _hint_guided_install(root)
+    if _candidate_repo_root() is None and not ns.refresh:
+        print(
+            "Tip: pip install -U laivision updates the CLI and compose bundle; "
+            "use lai upgrade --refresh to re-download the bundle tarball.",
+            file=sys.stderr,
+        )
     rc = pull_stack(root)
     if rc != 0:
         return rc

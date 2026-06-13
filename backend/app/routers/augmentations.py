@@ -751,6 +751,10 @@ async def create_augmented_dataset(
         db.add(target_dataset)
         db.commit()
         db.refresh(target_dataset)
+        from app.services.dataset_collections_service import ensure_default_image_collection
+
+        ensure_default_image_collection(db, target_dataset.id)
+        db.commit()
         
         # Create the task
         # Create a readable description of augmentation methods

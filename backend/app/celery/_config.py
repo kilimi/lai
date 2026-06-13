@@ -14,6 +14,7 @@ GENERAL_INCLUDE = [
     "app.tasks.dataset_tasks",
     "app.tasks.augmentation_tasks",
     "app.tasks.backup_tasks",
+    "app.tasks.database_export_tasks",
     "app.tasks.task_monitoring",
     "app.tasks.annotation_tasks",
     "app.tasks.depth_estimation_tasks",
@@ -35,6 +36,7 @@ TASK_ROUTES = {
     "app.tasks.dataset_tasks.*": {"queue": "general"},
     "app.tasks.augmentation_tasks.*": {"queue": "general"},
     "app.tasks.backup_tasks.*": {"queue": "general"},
+    "app.tasks.database_export_tasks.*": {"queue": "general"},
     "app.tasks.task_monitoring.*": {"queue": "general"},
     "app.tasks.annotation_tasks.*": {"queue": "general"},
     "app.tasks.depth_estimation_tasks.*": {"queue": "general"},
@@ -58,6 +60,10 @@ BEAT_SCHEDULE = {
         "task": "app.tasks.task_monitoring.auto_cancel_stale_tasks",
         "schedule": timedelta(minutes=30),
     },
+    "check-scheduled-backups": {
+        "task": "app.tasks.backup_tasks.check_scheduled_backups",
+        "schedule": timedelta(minutes=15),
+    },
 }
 
 # All queues used in the deployment (workers subscribe to subsets).
@@ -71,6 +77,9 @@ KNOWN_TASK_QUEUES = {
     "app.tasks.dataset_tasks.duplicate_dataset": "general",
     "app.tasks.augmentation_tasks.create_augmented_dataset": "general",
     "app.tasks.backup_tasks.run_manual_backup": "general",
+    "app.tasks.backup_tasks.run_restore_backup": "general",
+    "app.tasks.backup_tasks.check_scheduled_backups": "general",
+    "app.tasks.database_export_tasks.export_database": "general",
     "app.tasks.task_monitoring.auto_cancel_stale_tasks": "general",
     "app.tasks.task_monitoring.refresh_worker_gpu_status": "gpu",
     "app.tasks.annotation_tasks.process_annotation_file": "general",

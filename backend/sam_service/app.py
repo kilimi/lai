@@ -14,7 +14,12 @@ import numpy as np
 import requests
 import io
 
-from utils import decode_base64_image, encode_image_to_dataurl, mask_to_polygons
+from utils import (
+    decode_base64_image,
+    encode_image_to_dataurl,
+    polygons_from_instance_masks,
+    combine_instance_masks,
+)
 
 import torch  # used by both SAM 2 and SAM 3
 
@@ -186,6 +191,42 @@ def _load_sam3_model():
     return SAM3_MODEL, SAM3_PROCESSOR
 
 
+def _points_to_normalized_box(points, w, h, padding=None):
+    """SAM3 add_geometric_prompt expects [cx, cy, w, h] normalized to [0, 1]."""
+    box_xyxy = _points_to_box(points, w, h, padding)
+    if box_xyxy is None:
+        return None
+    x1, y1, x2, y2 = box_xyxy
+    cx = ((x1 + x2) / 2.0) / max(w, 1)
+    cy = ((y1 + y2) / 2.0) / max(h, 1)
+    bw = (x2 - x1) / max(w, 1)
+    bh = (y2 - y1) / max(h, 1)
+    return [cx, cy, bw, bh]
+
+
+def _get_sam3_image_state(processor, img_rgb, img_np):
+    """Image backbone state; reset stale prompts/masks before each new request."""
+    global SAM3_LAST_IMAGE_HASH, SAM3_LAST_STATE
+    current_hash = hashlib.sha256(img_np.tobytes()).hexdigest()
+    if current_hash != SAM3_LAST_IMAGE_HASH or SAM3_LAST_STATE is None:
+        SAM3_LAST_STATE = processor.set_image(img_rgb)
+        SAM3_LAST_IMAGE_HASH = current_hash
+    else:
+        processor.reset_all_prompts(SAM3_LAST_STATE)
+    return SAM3_LAST_STATE
+
+
+def _run_sam3_text_prompt(processor, state, text_prompt: str):
+    return processor.set_text_prompt(text_prompt.strip(), state)
+
+
+def _run_sam3_box_prompt(processor, state, points, orig_w, orig_h):
+    box = _points_to_normalized_box(points, orig_w, orig_h)
+    if box is None:
+        return None
+    return processor.add_geometric_prompt(box, True, state)
+
+
 def _points_to_box(points, w, h, padding=None):
     pad = padding or POINT_BOX_PADDING
     if not points:
@@ -318,67 +359,37 @@ def _segment_sam3(data):
     try:
         model, processor = _load_sam3_model()
         device = next(model.parameters()).device
-        global SAM3_LAST_IMAGE_HASH, SAM3_LAST_STATE
-        current_hash = hashlib.sha256(img_np.tobytes()).hexdigest()
 
         with torch.inference_mode(), _sam3_autocast(device):
-            if current_hash != SAM3_LAST_IMAGE_HASH or SAM3_LAST_STATE is None:
-                inference_state = processor.set_image(img_rgb)
-                SAM3_LAST_IMAGE_HASH = current_hash
-                SAM3_LAST_STATE = inference_state
-            else:
-                inference_state = SAM3_LAST_STATE
+            inference_state = _get_sam3_image_state(processor, img_rgb, img_np)
+            result_state = None
 
-            masks_np = None
             if text_prompt and isinstance(text_prompt, str) and text_prompt.strip():
-                output = processor.set_text_prompt(state=inference_state, prompt=text_prompt.strip())
-                masks_np = output.get("masks")
-            if masks_np is None or (isinstance(masks_np, (list, tuple)) and len(masks_np) == 0):
+                result_state = _run_sam3_text_prompt(processor, inference_state, text_prompt)
+
+            masks_np = result_state.get("masks") if isinstance(result_state, dict) else None
+            if masks_np is None or (hasattr(masks_np, "numel") and masks_np.numel() == 0):
                 pts = points if points and len(points) > 0 else [point] if point else None
-                box = _points_to_box(pts, orig_w, orig_h) if pts else None
-                if box is not None:
-                    try:
-                        output = processor.set_box_prompt(state=inference_state, box=box)
-                        masks_np = output.get("masks") if isinstance(output, dict) else None
-                    except Exception:
-                        pass
-                if masks_np is None or (isinstance(masks_np, (list, tuple)) and len(masks_np) == 0):
-                    output = processor.set_text_prompt(state=inference_state, prompt="object")
-                    masks_np = output.get("masks")
+                if pts:
+                    # Fresh prompt state for geometric fallback (avoid stale text masks).
+                    inference_state = _get_sam3_image_state(processor, img_rgb, img_np)
+                    result_state = _run_sam3_box_prompt(processor, inference_state, pts, orig_w, orig_h)
+                    masks_np = result_state.get("masks") if isinstance(result_state, dict) else None
 
-        if masks_np is None or (isinstance(masks_np, (list, tuple)) and len(masks_np) == 0):
+            if masks_np is None or (hasattr(masks_np, "numel") and masks_np.numel() == 0):
+                inference_state = _get_sam3_image_state(processor, img_rgb, img_np)
+                result_state = _run_sam3_text_prompt(processor, inference_state, "object")
+                masks_np = result_state.get("masks") if isinstance(result_state, dict) else None
+
+        if masks_np is None or (hasattr(masks_np, "numel") and masks_np.numel() == 0):
             return jsonify({"error": "No mask produced"}), 500
 
-        mask = masks_np[0] if isinstance(masks_np, (list, tuple)) else masks_np
-        if hasattr(mask, "cpu"):
-            mask = mask.cpu().numpy()
-        mask = np.asarray(mask)
-        # SAM 3 can return (1, 1, H*W) or (1, H, W) or (0, H, W) when no mask; ensure we have data
-        if mask.size == 0 or (mask.ndim >= 1 and mask.shape[0] == 0):
+        polys_out = polygons_from_instance_masks(masks_np, orig_w, orig_h)
+        if not polys_out:
             return jsonify({"error": "No mask produced"}), 500
-        mask = np.squeeze(mask)
-        if mask.size == 0 or (mask.ndim >= 1 and mask.shape[0] == 0):
-            return jsonify({"error": "No mask produced"}), 500
-        while mask.ndim > 2:
-            if mask.shape[0] == 0:
-                return jsonify({"error": "No mask produced"}), 500
-            mask = mask[0]
-        if mask.ndim == 1:
-            mask = mask.reshape(1, -1)
-        mask = (mask > 0.5).astype(np.uint8) * 255
-        # PIL requires 2D (H, W); force it in case of (1, 1, N) etc.
-        mask = np.squeeze(mask)
-        if mask.ndim == 1:
-            mask = mask.reshape(1, -1)
-        if mask.ndim > 2:
-            mask = mask.reshape(mask.shape[0], -1)
-        if mask.shape[0] != orig_h or mask.shape[1] != orig_w:
-            mask_pil = Image.fromarray(mask).resize((orig_w, orig_h), Image.NEAREST)
-            mask = np.array(mask_pil)
 
-        polygons = mask_to_polygons(mask)
-        polys_out = [[[int(x), int(y)] for (x, y) in poly] for poly in polygons]
-        mask_pil = Image.fromarray(mask).convert("RGBA")
+        combined = combine_instance_masks(masks_np, orig_w, orig_h)
+        mask_pil = Image.fromarray(combined).convert("RGBA")
         mask_dataurl = encode_image_to_dataurl(mask_pil)
         return jsonify({"polygons": polys_out, "maskBase64": mask_dataurl, "source": "sam3"})
     except Exception as e:

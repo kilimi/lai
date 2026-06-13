@@ -1,6 +1,8 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { Download, Upload, Database, AlertTriangle, Info, FileArchive, Trash2, Skull, ChevronRight, ChevronDown, Copy, Check } from "lucide-react";
 import { useExport } from "@/contexts/ExportContext";
+import { useTask } from "@/hooks/use-task";
+import { API_CONFIG } from "@/config/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
@@ -88,17 +90,60 @@ export function DatabaseManager({
   const [activeTab, setActiveTab] = useState("select");
   const [linuxExpanded, setLinuxExpanded] = useState(false);
   const [windowsExpanded, setWindowsExpanded] = useState(false);
-  const abortControllerRef = useRef<AbortController | null>(null);
+  const [exportTaskId, setExportTaskId] = useState<number | null>(null);
+  const [exportStage, setExportStage] = useState<string>("");
 
-  // Cleanup on unmount or dialog close
+  const handleExportComplete = useCallback((task: { id: number | string }) => {
+    const url = `${API_CONFIG.baseUrl}/database/export/download/${task.id}`;
+    const link = document.createElement("a");
+    link.href = url;
+    link.rel = "noopener";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast({
+      title: "Export ready",
+      description: "Download started. Check your browser downloads folder.",
+    });
+    setShowExportDialog(false);
+    setIsExporting(false);
+    setGlobalExporting(false);
+    setExportTaskId(null);
+    setExportProgress(0);
+    setExportStage("");
+  }, [toast, setGlobalExporting]);
+
+  const handleExportError = useCallback((task: { error_message?: string; task_metadata?: Record<string, unknown> }) => {
+    toast({
+      title: "Export failed",
+      description: task.error_message || "Database export failed",
+      variant: "destructive",
+    });
+    setIsExporting(false);
+    setGlobalExporting(false);
+    setExportTaskId(null);
+    setExportProgress(0);
+    setExportStage("");
+  }, [toast, setGlobalExporting]);
+
+  const { task: activeExportTask } = useTask(exportTaskId, {
+    poll: exportTaskId != null,
+    pollInterval: 3000,
+    maxPollDuration: 86_400_000,
+    onComplete: handleExportComplete,
+    onError: handleExportError,
+  });
+
   useEffect(() => {
-    return () => {
-      // Cancel any ongoing export when component unmounts
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
-    };
-  }, []);
+    if (!activeExportTask) return;
+    if (typeof activeExportTask.progress === "number") {
+      setExportProgress(Math.round(activeExportTask.progress));
+    }
+    const stage = activeExportTask.task_metadata?.stage;
+    if (typeof stage === "string") {
+      setExportStage(stage);
+    }
+  }, [activeExportTask]);
 
   // Handle dialog close - cancel export if in progress
   const handleDialogClose = (open: boolean) => {
@@ -152,70 +197,58 @@ export function DatabaseManager({
       return;
     }
 
-    // Create new AbortController for this export
-    const abortController = new AbortController();
-    abortControllerRef.current = abortController;
-
     setIsExporting(true);
-    setGlobalExporting(true); // Pause background polling
+    setGlobalExporting(true);
     setExportProgress(0);
-    
+    setExportStage("queued");
+
+    const projectIds = Array.from(selectedProjects);
+    const datasetIds = Array.from(selectedDatasets);
+
     try {
-      const onProgress = (progress: number) => {
-        // Don't update progress if cancelled
-        if (!abortController.signal.aborted) {
-          setExportProgress(progress);
-        }
-      };
+      const response = await api.startDatabaseExport({
+        include_files: includeFiles,
+        project_ids: projectIds.length > 0 ? projectIds : undefined,
+        dataset_ids: datasetIds.length > 0 ? datasetIds : undefined,
+      });
 
-      // Prepare filter parameters
-      const projectIds = Array.from(selectedProjects);
-      const datasetIds = Array.from(selectedDatasets);
+      if (!response.success) {
+        throw new Error(response.error || "Failed to start export");
+      }
+      const taskId =
+        (response as { task_id?: number }).task_id ?? response.data?.task_id;
+      if (!taskId) {
+        throw new Error("Failed to start export (no task id)");
+      }
 
-      if (includeFiles) {
-        await api.exportDatabaseWithFiles(onProgress, projectIds, datasetIds, abortController.signal);
-      } else {
-        await api.exportDatabase(onProgress, projectIds, datasetIds, abortController.signal);
-      }
-      
-      // Only show success if not cancelled
-      if (!abortController.signal.aborted) {
-        toast({
-          title: "Export Complete",
-          description: `Database export ${includeFiles ? 'with files' : 'data only'} completed successfully.`,
-        });
-        setShowExportDialog(false);
-      }
+      setExportTaskId(taskId);
+      setExportProgress(5);
+      toast({
+        title: "Export started",
+        description: includeFiles
+          ? "Building archive on the server. Progress updates below; download starts when complete."
+          : "Exporting database JSON on the server. Download starts when complete.",
+      });
     } catch (error) {
-      // Only show error if it wasn't a cancellation
-      if (error instanceof Error && error.message.includes('cancelled')) {
-        toast({
-          title: "Export Cancelled",
-          description: "The export was cancelled.",
-        });
-      } else {
-        console.error('Export failed:', error);
-        toast({
-          title: "Export Failed",
-          description: error instanceof Error ? error.message : "Failed to export database",
-          variant: "destructive",
-        });
-      }
-    } finally {
+      console.error("Export failed:", error);
+      toast({
+        title: "Export Failed",
+        description: error instanceof Error ? error.message : "Failed to start export",
+        variant: "destructive",
+      });
       setIsExporting(false);
-      setGlobalExporting(false); // Resume background polling
+      setGlobalExporting(false);
       setExportProgress(0);
-      abortControllerRef.current = null;
+      setExportStage("");
     }
   };
 
   const handleCancelExport = () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
+    setExportTaskId(null);
     setIsExporting(false);
-    setGlobalExporting(false); // Resume background polling
+    setGlobalExporting(false);
     setExportProgress(0);
+    setExportStage("");
   };
 
   const handleImportDatabase = async (file: File) => {
@@ -349,11 +382,17 @@ export function DatabaseManager({
                 </div>
               </div>
               <p className="text-xs text-muted-foreground">
-                {exportProgress < 95 
-                  ? "Downloading database export..." 
+                {exportStage === "queued" || exportStage === "preparing"
+                  ? "Waiting for worker to start..."
+                  : exportStage === "database"
+                  ? "Exporting database records..."
+                  : exportStage === "files"
+                  ? `Adding files to archive${activeExportTask?.task_metadata?.files_total
+                      ? ` (${activeExportTask.task_metadata.files_done ?? 0}/${activeExportTask.task_metadata.files_total})`
+                      : ""}...`
                   : exportProgress < 100
-                  ? "Processing file for download..."
-                  : "Export complete! Your download should start shortly."}
+                  ? "Export in progress..."
+                  : "Export complete! Check your browser downloads."}
               </p>
               <Button
                 variant="outline"
@@ -633,7 +672,8 @@ export function DatabaseManager({
                       <div className="flex-1">
                         <h3 className="font-medium">Complete Archive (ZIP)</h3>
                         <p className="text-sm text-muted-foreground mt-1">
-                          Includes database + all image files. Slow for large datasets.
+                          Includes database + all image files. The browser downloads directly
+                          (recommended for large datasets: use Database Only + manual copy instead).
                         </p>
                         <div className="flex gap-2 mt-2">
                           <Badge variant="outline" className="text-xs">Minutes to hours</Badge>
@@ -805,11 +845,11 @@ Copy-Item -Recurse C:\path\to\lai\backend\data\ C:\destination\data\</pre>
                   </div>
                   <Progress value={exportProgress} className="w-full" />
                   <p className="text-xs text-muted-foreground text-center">
-                    {exportProgress < 95 
-                      ? "Downloading database export..." 
-                      : exportProgress < 100
-                      ? "Processing file for download..."
-                      : "Export complete! Your download should start shortly."}
+                    {exportStage === "files"
+                      ? `Adding files${activeExportTask?.task_metadata?.files_total
+                          ? ` (${activeExportTask.task_metadata.files_done ?? 0}/${activeExportTask.task_metadata.files_total})`
+                          : ""}...`
+                      : exportStage || "Export in progress..."}
                   </p>
                   <div className="flex justify-center pt-2">
                     <Button

@@ -42,6 +42,7 @@ from app.services.dataset_video_extract_service import extract_frames_from_video
 from app.services import dataset_annotations_service as ann_svc
 from app.services.dataset_annotation_merge_service import start_annotation_merge
 from app.services.dataset_fiftyone_service import view_annotations_in_fiftyone
+from app.services.dataset_collections_service import ensure_default_image_collection
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -81,6 +82,9 @@ async def create_dataset(
             db_dataset.thumbnailUrl = thumbnail_url
             db_dataset.logo_url = thumbnail_url  # Use thumbnail for logo_url too
         db.add(db_dataset)
+        db.commit()
+        db.refresh(db_dataset)
+        ensure_default_image_collection(db, db_dataset.id)
         db.commit()
         db.refresh(db_dataset)
         return db_dataset

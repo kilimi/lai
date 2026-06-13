@@ -28,7 +28,8 @@ import {
   Brain,
   Copy,
   Sparkles,
-  ExternalLink
+  ExternalLink,
+  Download,
 } from 'lucide-react';
 
 interface TasksPopoverProps {
@@ -99,6 +100,8 @@ export const TasksPopover = ({ projectId }: TasksPopoverProps) => {
         return <Layers className="w-4 h-4 text-sky-500" />;
       case 'model_export':
         return <Copy className="w-4 h-4 text-slate-500" />;
+      case 'database_export':
+        return <Download className="w-4 h-4 text-emerald-500" />;
       default:
         return <ListTodo className="w-4 h-4 text-gray-500" />;
     }
@@ -128,7 +131,9 @@ export const TasksPopover = ({ projectId }: TasksPopoverProps) => {
       case 'depth_estimation':
         return 'Depth';
       case 'model_export':
-        return 'Export';
+        return 'Model export';
+      case 'database_export':
+        return 'DB export';
       default:
         return taskType.replace(/_/g, ' ');
     }

@@ -3,11 +3,10 @@ from __future__ import annotations
 import shutil
 import tarfile
 import tempfile
-import urllib.request
 from pathlib import Path
-from urllib.error import URLError
 
 from lai.constants import DEFAULT_BUNDLE_TARBALL
+from lai.http_fetch import fetch_bytes
 from lai.paths import bundle_data_dir
 
 
@@ -29,11 +28,7 @@ def ensure_bundle(*, force: bool = False) -> Path:
     with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as tmp:
         tpath = Path(tmp.name)
     try:
-        try:
-            with urllib.request.urlopen(url, timeout=120) as resp:
-                tpath.write_bytes(resp.read())
-        except URLError as e:
-            raise RuntimeError(f"Failed to download bundle from {url}: {e}") from e
+        tpath.write_bytes(fetch_bytes(url, timeout=120))
         _extract_tarball_strip_root(tpath, dest)
     finally:
         tpath.unlink(missing_ok=True)

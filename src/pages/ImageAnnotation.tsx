@@ -2198,33 +2198,35 @@ const ImageAnnotation = () => {
         const rawPolygons = json.polygons || [];
         if (rawPolygons.length === 0) continue;
 
-        // Use only the first polygon per image so we create one annotation per image (toast count matches saved count)
-        const firstPoly = rawPolygons[0];
-        const points: Point[] = firstPoly.map((p: number[]) => ({ x: p[0], y: p[1] }));
-        if (points.length < 3) continue;
-        if (samMinArea > 0 && calculatePolygonArea(points) < samMinArea) continue;
-
         const imageName = img.fileName;
-        const newAnn: AnnotationShape = {
-          id: `annotation_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`,
-          type: 'polygon',
-          points,
-          label: classObj.name,
-          color: classObj.color,
-          visible: true,
-        };
-
         const collId = displayLayer || mainLayer || 'default';
         const storageKey = `annotations_${id}_${collId}_${imageName}`;
         const raw = localStorage.getItem(storageKey);
         const existing: AnnotationShape[] = raw ? JSON.parse(raw) : [];
-        const merged = [...existing, newAnn];
+        const newAnns: AnnotationShape[] = [];
+
+        for (const poly of rawPolygons) {
+          const points: Point[] = poly.map((p: number[]) => ({ x: p[0], y: p[1] }));
+          if (points.length < 3) continue;
+          if (samMinArea > 0 && calculatePolygonArea(points) < samMinArea) continue;
+          newAnns.push({
+            id: `annotation_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`,
+            type: 'polygon',
+            points,
+            label: classObj.name,
+            color: classObj.color,
+            visible: true,
+          });
+        }
+        if (newAnns.length === 0) continue;
+
+        const merged = [...existing, ...newAnns];
         const dims =
           img.width && img.height ? { width: img.width, height: img.height } : undefined;
         // Use the central helper so duplicate-annotation companions also receive the write
         saveAnnotationsToLocalStorage(imageName, merged, dims);
         
-        addedCount += 1;
+        addedCount += newAnns.length;
       } catch {
         failCount++;
       }

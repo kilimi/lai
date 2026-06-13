@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -23,6 +23,9 @@ from app.routers import backup as backup_router  # noqa: E402
 from app.services.backup_runner import (  # noqa: E402
     is_backup_configured,
     is_backup_path_configured,
+    is_automatic_backup_due,
+    is_automatic_backup_enabled,
+    compute_next_backup_at,
     resolve_backup_paths,
     BackupResult,
     RestoreResult,
@@ -228,14 +231,15 @@ class TestBackupRouter:
         )
         assert response.status_code == 400
 
-    def test_restore_starts_with_valid_confirm(self, backup_api_client, tmp_path):
+    def test_restore_starts_with_valid_confirm(self, backup_api_client, tmp_path, monkeypatch):
         client, Session = backup_api_client
         snapshot = tmp_path / "backup_test"
         snapshot.mkdir()
         with Session() as db:
             record = _seed_backup_record(db, str(snapshot))
 
-        with patch("app.routers.backup.run_restore") as mock_restore:
+        monkeypatch.setattr(backup_router, "use_celery_enabled", lambda: True)
+        with patch("app.tasks.backup_tasks.run_restore_backup.delay") as mock_delay:
             response = client.post(
                 f"/backup/{record.id}/restore",
                 json={
@@ -247,6 +251,11 @@ class TestBackupRouter:
 
         assert response.status_code == 200
         assert response.json()["success"] is True
+        mock_delay.assert_called_once_with(
+            record.id,
+            restore_database=True,
+            restore_files=False,
+        )
 
     def test_list_backups_with_empty_path(self, backup_api_client, tmp_path, monkeypatch):
         client, Session = backup_api_client
@@ -283,3 +292,79 @@ class TestBackupRouter:
         assert body["id"] == record.id
         assert body["can_restore"] is True
         assert body["can_restore_database"] is True
+
+
+class TestAutomaticBackupScheduling:
+    def test_is_automatic_backup_due_when_enabled_and_past_next(self):
+        settings = models.BackupSettings(
+            enabled=True,
+            backup_path="",
+            frequency_hours=24,
+            next_backup_at=datetime.utcnow() - timedelta(hours=1),
+        )
+        assert is_automatic_backup_due(settings)
+
+    def test_is_automatic_backup_due_false_when_disabled(self):
+        settings = models.BackupSettings(
+            enabled=False,
+            backup_path="",
+            next_backup_at=datetime.utcnow() - timedelta(hours=1),
+        )
+        assert not is_automatic_backup_due(settings)
+
+    def test_compute_next_backup_at_from_last(self):
+        last = datetime(2024, 1, 1, 12, 0, 0)
+        settings = models.BackupSettings(enabled=True, backup_path="", frequency_hours=12)
+        nxt = compute_next_backup_at(settings, from_time=last)
+        assert nxt == datetime(2024, 1, 2, 0, 0, 0)
+
+    def test_check_scheduled_backups_dispatches(self, backup_api_client, monkeypatch):
+        client, Session = backup_api_client
+        monkeypatch.setattr("app.tasks.backup_tasks.SessionLocal", Session)
+        with Session() as db:
+            settings = _seed_backup_settings(db, backup_path="")
+            settings.enabled = True
+            settings.next_backup_at = datetime.utcnow() - timedelta(minutes=5)
+            db.commit()
+            settings_id = settings.id
+
+        with patch("app.tasks.backup_tasks.run_manual_backup.delay") as mock_delay:
+            from app.tasks.backup_tasks import check_scheduled_backups
+
+            result = check_scheduled_backups()
+
+        assert result["status"] == "dispatched"
+        mock_delay.assert_called_once_with(settings_id)
+
+    def test_check_scheduled_backups_skips_in_progress(self, backup_api_client, monkeypatch):
+        client, Session = backup_api_client
+        monkeypatch.setattr("app.tasks.backup_tasks.SessionLocal", Session)
+        with Session() as db:
+            settings = _seed_backup_settings(db, backup_path="")
+            settings.enabled = True
+            settings.next_backup_at = datetime.utcnow() - timedelta(minutes=5)
+            _seed_backup_record(db, str(Path("/tmp/in-progress")), status="in_progress")
+            db.commit()
+
+        with patch("app.tasks.backup_tasks.run_manual_backup.delay") as mock_delay:
+            from app.tasks.backup_tasks import check_scheduled_backups
+
+            result = check_scheduled_backups()
+
+        assert result["status"] == "skipped"
+        assert result["reason"] == "in_progress"
+        mock_delay.assert_not_called()
+
+    def test_settings_enable_sets_next_backup(self, backup_api_client):
+        client, Session = backup_api_client
+        with Session() as db:
+            _seed_backup_settings(db, backup_path="")
+
+        response = client.post(
+            "/backup/settings",
+            json={"enabled": True, "frequency_hours": 24, "retention_days": 30},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["settings"]["enabled"] is True
+        assert body["settings"]["next_backup_at"] is not None

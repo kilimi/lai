@@ -92,7 +92,7 @@ export function useTask(taskId: number | string | null | undefined, options: Use
         setError(null);
         
         // Check if polling should stop
-        if (poll && pollIntervalRef.current) {
+        if (poll) {
           if (taskData.status === 'completed') {
             cleanup();
             onComplete?.(taskData);

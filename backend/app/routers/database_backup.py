@@ -1,5 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Response
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Response, BackgroundTasks
+from fastapi.responses import StreamingResponse, FileResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 import json
@@ -11,11 +11,23 @@ import tempfile
 import math
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Iterator, Optional
 import logging
 
+from pydantic import BaseModel
+from starlette.concurrency import iterate_in_threadpool, run_in_threadpool
+
 from .. import models
-from ..database import get_db, engine
+from ..database import get_db, engine, SessionLocal
+from ..services.database_export_service import (
+    export_headers,
+    generate_json_stream,
+    build_export_zip_on_disk,
+    has_in_progress_database_export,
+    resolve_export_file,
+    run_database_export,
+)
+from ..task_dispatch import ensure_inline_dispatch_allowed, use_celery_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -137,233 +149,171 @@ def get_all_table_data(db: Session, project_ids: List[int] = None, dataset_ids: 
     
     return data
 
+
+class DatabaseExportStartRequest(BaseModel):
+    include_files: bool = False
+    project_ids: Optional[List[int]] = None
+    dataset_ids: Optional[List[int]] = None
+    task_name: Optional[str] = None
+
+
+@router.post("/database/export/start")
+async def start_database_export(
+    body: DatabaseExportStartRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """Start a background database export task (JSON or ZIP)."""
+    if has_in_progress_database_export(db):
+        raise HTTPException(
+            status_code=409,
+            detail="A database export is already in progress",
+        )
+
+    label = "Complete archive" if body.include_files else "Database JSON"
+    task_name = body.task_name or f"{label} {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}"
+    export_task = models.Task(
+        name=task_name,
+        task_type="database_export",
+        status="pending",
+        progress=0.0,
+        task_metadata={
+            "include_files": body.include_files,
+            "project_ids": body.project_ids,
+            "dataset_ids": body.dataset_ids,
+            "stage": "queued",
+        },
+    )
+    db.add(export_task)
+    db.commit()
+    db.refresh(export_task)
+
+    if use_celery_enabled():
+        from app.tasks.database_export_tasks import export_database as export_database_task
+
+        celery_result = export_database_task.delay(export_task.id)
+        export_task.task_metadata = {
+            **(export_task.task_metadata or {}),
+            "celery_task_id": celery_result.id,
+        }
+        db.commit()
+    else:
+        ensure_inline_dispatch_allowed("Database export")
+        background_tasks.add_task(run_database_export, export_task.id)
+
+    return {
+        "success": True,
+        "task_id": export_task.id,
+        "message": "Database export started",
+        "data": {
+            "task_id": export_task.id,
+            "name": export_task.name,
+            "status": export_task.status,
+        },
+    }
+
+
+@router.get("/database/export/download/{task_id}")
+async def download_database_export(task_id: int, db: Session = Depends(get_db)):
+    """Download a completed database export file."""
+    task = (
+        db.query(models.Task)
+        .filter(
+            models.Task.id == task_id,
+            models.Task.task_type == "database_export",
+        )
+        .first()
+    )
+    if not task:
+        raise HTTPException(status_code=404, detail="Export task not found")
+    if task.status != "completed":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Export is not ready (status={task.status})",
+        )
+
+    try:
+        path = resolve_export_file(task)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    meta = task.task_metadata or {}
+    filename = meta.get("download_filename") or path.name
+    export_format = meta.get("export_format", "json")
+    media_type = "application/zip" if export_format == "zip" else "application/json"
+
+    return FileResponse(
+        path=str(path),
+        media_type=media_type,
+        filename=filename,
+        headers=export_headers(filename, content_length=path.stat().st_size),
+    )
+
+
 @router.get("/database/export")
 async def export_database(
     project_ids: str = None,
     dataset_ids: str = None,
-    db: Session = Depends(get_db)
 ):
-    """Export the entire database or filtered subset to a JSON file"""
+    """Legacy: stream JSON export. Prefer POST /database/export/start."""
     try:
-        logger.info("Starting database export")
-        
-        # Parse comma-separated IDs
-        project_id_list = [int(x) for x in project_ids.split(',')] if project_ids else None
-        dataset_id_list = [int(x) for x in dataset_ids.split(',')] if dataset_ids else None
-        
-        logger.info(f"Exporting with filters - projects: {project_id_list}, datasets: {dataset_id_list}")
-        
-        # TRUE STREAMING: Generate JSON incrementally without building entire structure in memory
-        def generate_json_stream():
-            """Generator that yields JSON chunks as they're created"""
-            try:
-                # Start JSON structure
-                yield b'{"metadata":{"export_date":"'
-                yield datetime.utcnow().isoformat().encode('utf-8')
-                yield b'","version":"1.0","description":"AI Data Creator Database Backup"},"data":{'
-                
-                # Export each table incrementally
-                table_order = [
-                    'projects', 'datasets', 'image_collections', 'images',
-                    'annotation_files', 'annotation_classes', 'annotations',
-                    'tasks', 'augmentations', 'dataset_groups'
-                ]
-                
-                first_table = True
-                for table_name in table_order:
-                    try:
-                        # Add comma between tables
-                        if not first_table:
-                            yield b','
-                        first_table = False
-                        
-                        # Start table array
-                        yield f'"{table_name}":['.encode('utf-8')
-                        
-                        # Get model class - use explicit mapping
-                        model_map = {
-                            'projects': models.Project,
-                            'datasets': models.Dataset,
-                            'image_collections': models.ImageCollection,
-                            'images': models.Image,
-                            'annotation_files': models.AnnotationFile,
-                            'annotation_classes': models.AnnotationClass,
-                            'annotations': models.Annotation,
-                            'tasks': models.Task,
-                            'augmentations': models.Augmentation,
-                            'dataset_groups': models.DatasetGroup
-                        }
-                        model_class = model_map.get(table_name)
-                        
-                        if model_class:
-                            query = db.query(model_class)
-                            
-                            # Apply filters based on table
-                            if project_id_list:
-                                if table_name == 'projects':
-                                    query = query.filter(model_class.id.in_(project_id_list))
-                                elif table_name in ['datasets', 'tasks', 'dataset_groups']:
-                                    query = query.filter(model_class.project_id.in_(project_id_list))
-                            
-                            if dataset_id_list:
-                                if table_name == 'datasets':
-                                    query = query.filter(model_class.id.in_(dataset_id_list))
-                                elif table_name in ['images', 'image_collections', 'annotation_files', 'annotation_classes', 'annotations']:
-                                    query = query.filter(model_class.dataset_id.in_(dataset_id_list))
-                            
-                            # Stream records in batches
-                            first_record = True
-                            record_count = 0
-                            for record in query.yield_per(500):
-                                if not first_record:
-                                    yield b','
-                                first_record = False
-                                
-                                # Serialize and yield record
-                                record_dict = serialize_model(record)
-                                yield json.dumps(
-                                    record_dict,
-                                    ensure_ascii=False,
-                                    allow_nan=False,
-                                    default=str,
-                                ).encode('utf-8')
-                                record_count += 1
-                                
-                                # Log progress every 1000 records
-                                if record_count % 1000 == 0:
-                                    logger.info(f"  Streamed {record_count} records from {table_name}...")
-                            
-                            logger.info(f"✓ Streamed {record_count} records from {table_name}")
-                        
-                        # Close table array
-                        yield b']'
-                        
-                    except Exception as e:
-                        logger.error(f"Error streaming table {table_name}: {str(e)}")
-                        # Close the array opened above; yielding '[]' would corrupt JSON.
-                        yield b']'
-                
-                # Close JSON structure
-                yield b'}}'
-                logger.info("✓ Database export completed successfully")
-                
-            except Exception as e:
-                logger.error(f"Error in JSON stream generation: {str(e)}", exc_info=True)
-                raise
-        
-        # Create filename
+        logger.info("Starting database export (legacy stream)")
+        project_id_list = [int(x) for x in project_ids.split(",")] if project_ids else None
+        dataset_id_list = [int(x) for x in dataset_ids.split(",")] if dataset_ids else None
+
         filename = f"lai_backup_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.json"
-        
-        # Use StreamingResponse with chunked encoding
         return StreamingResponse(
-            generate_json_stream(),
+            iterate_in_threadpool(
+                generate_json_stream(project_id_list, dataset_id_list)
+            ),
             media_type="application/json",
-            headers={
-                "Content-Disposition": f"attachment; filename={filename}",
-            }
+            headers=export_headers(filename),
         )
-        
     except Exception as e:
-        logger.error(f"Database export failed: {str(e)}")
+        logger.error("Database export failed: %s", e)
         raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
+
 
 @router.get("/database/export-with-files")
 async def export_database_with_files(
+    background_tasks: BackgroundTasks,
     project_ids: str = None,
     dataset_ids: str = None,
-    db: Session = Depends(get_db)
 ):
-    """Export the entire database or filtered subset along with all project files as a ZIP"""
+    """Legacy sync ZIP export. Prefer POST /database/export/start."""
     try:
-        logger.info("Starting database export with files")
-        
-        # Parse comma-separated IDs
-        project_id_list = [int(x) for x in project_ids.split(',')] if project_ids else None
-        dataset_id_list = [int(x) for x in dataset_ids.split(',')] if dataset_ids else None
-        
-        logger.info(f"Exporting with filters - projects: {project_id_list}, datasets: {dataset_id_list}")
-        
-        # Create temporary directory
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_path = Path(temp_dir)
-            
-            # Export database data with filters
-            data = get_all_table_data(db, project_id_list, dataset_id_list)
-            export_data = {
-                "metadata": {
-                    "export_date": datetime.utcnow().isoformat(),
-                    "version": "1.0",
-                    "description": "AI Data Creator Database Backup with Files"
-                },
-                "data": data
-            }
-            
-            # Save database export to temp directory
-            db_file = temp_path / "database.json"
-            with open(db_file, 'w', encoding='utf-8') as f:
-                json.dump(export_data, f, indent=2, ensure_ascii=False)
-            
-            # Create ZIP file in memory
-            # Using compression level 1 for faster exports (vs default level 9)
-            zip_buffer = io.BytesIO()
-            
-            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED, compresslevel=1) as zip_file:
-                # Add database file
-                zip_file.write(db_file, "database.json")
-                
-                # Add project files if they exist (filtered if needed)
-                projects_dir = Path("projects")
-                if projects_dir.exists():
-                    for project_file in projects_dir.rglob("*"):
-                        if project_file.is_file():
-                            # If filtering by projects, only include those project directories
-                            if project_id_list:
-                                project_folder = project_file.parts[1] if len(project_file.parts) > 1 else None
-                                if project_folder and not project_folder.isdigit():
-                                    continue
-                                if project_folder and int(project_folder) not in project_id_list:
-                                    continue
-                            
-                            # Use relative path in ZIP
-                            arcname = str(project_file.relative_to("."))
-                            zip_file.write(project_file, arcname)
-                            logger.info(f"Added file to ZIP: {arcname}")
-                
-                # Add data files if they exist
-                data_dir = Path("data")
-                if data_dir.exists():
-                    for data_file in data_dir.rglob("*"):
-                        if data_file.is_file():
-                            # Use relative path in ZIP
-                            arcname = str(data_file.relative_to("."))
-                            zip_file.write(data_file, arcname)
-                            logger.info(f"Added file to ZIP: {arcname}")
-            
-            # IMPORTANT: Get the size AFTER closing the ZipFile
-            # to ensure all data is written to the buffer
-            zip_buffer.seek(0)
-            zip_content = zip_buffer.read()
-            zip_size = len(zip_content)
-            
-            logger.info(f"Created ZIP file with size: {zip_size} bytes")
-            
-            # Create filename
-            filename = f"lai_full_backup_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.zip"
-            
-            # Reset buffer for streaming
-            zip_buffer = io.BytesIO(zip_content)
-            
-            return StreamingResponse(
-                zip_buffer,
-                media_type="application/zip",
-                headers={
-                    "Content-Disposition": f"attachment; filename={filename}",
-                    "Content-Length": str(zip_size)
-                }
-            )
-            
+        logger.info("Starting database export with files (legacy)")
+        project_id_list = [int(x) for x in project_ids.split(",")] if project_ids else None
+        dataset_id_list = [int(x) for x in dataset_ids.split(",")] if dataset_ids else None
+
+        work_dir = Path(tempfile.mkdtemp(prefix="lai-export-"))
+        zip_path = await run_in_threadpool(
+            build_export_zip_on_disk,
+            work_dir,
+            project_id_list,
+            dataset_id_list,
+        )
+        zip_size = zip_path.stat().st_size
+        filename = zip_path.name
+
+        def _cleanup(path: Path) -> None:
+            try:
+                path.unlink(missing_ok=True)
+                if path.parent.exists():
+                    shutil.rmtree(path.parent, ignore_errors=True)
+            except OSError:
+                pass
+
+        background_tasks.add_task(_cleanup, zip_path)
+
+        return FileResponse(
+            path=str(zip_path),
+            media_type="application/zip",
+            filename=filename,
+            headers=export_headers(filename, content_length=zip_size),
+        )
     except Exception as e:
-        logger.error(f"Database export with files failed: {str(e)}")
+        logger.error("Database export with files failed: %s", e)
         raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
 
 def deserialize_model_data(table_name: str, data: Dict[str, Any]) -> Dict[str, Any]:

@@ -34,3 +34,58 @@ def mask_to_polygons(mask_np: np.ndarray) -> List[List[Tuple[int,int]]]:
         if len(poly) >= 3:
             polys.append(poly)
     return polys
+
+
+def mask_binary_uint8(mask) -> np.ndarray:
+    """Convert a SAM mask tensor/array to HxW uint8 {0,255}."""
+    if hasattr(mask, "cpu"):
+        mask = mask.cpu().numpy()
+    mask = np.asarray(mask)
+    mask = np.squeeze(mask)
+    while mask.ndim > 2:
+        mask = mask[0]
+    return (mask > 0.5).astype(np.uint8) * 255
+
+
+def iter_instance_masks(masks) -> List[np.ndarray]:
+    """Split SAM3 state['masks'] (N,1,H,W) into per-instance HxW masks."""
+    if masks is None:
+        return []
+    if hasattr(masks, "cpu"):
+        masks = masks.cpu().numpy()
+    masks = np.asarray(masks)
+    if masks.size == 0:
+        return []
+    if masks.ndim >= 4:
+        return [mask_binary_uint8(masks[i]) for i in range(masks.shape[0])]
+    if masks.ndim == 3:
+        return [mask_binary_uint8(masks[i]) for i in range(masks.shape[0])]
+    return [mask_binary_uint8(masks)]
+
+
+def polygons_from_instance_masks(
+    masks,
+    orig_w: int,
+    orig_h: int,
+) -> List[List[List[int]]]:
+    """One or more polygons per detected instance; all instances included."""
+    polys_out: List[List[List[int]]] = []
+    for mask in iter_instance_masks(masks):
+        if mask.shape[0] != orig_h or mask.shape[1] != orig_w:
+            mask_pil = Image.fromarray(mask).resize((orig_w, orig_h), Image.NEAREST)
+            mask = np.array(mask_pil)
+        for poly in mask_to_polygons(mask):
+            polys_out.append([[int(x), int(y)] for (x, y) in poly])
+    return polys_out
+
+
+def combine_instance_masks(masks, orig_w: int, orig_h: int) -> np.ndarray:
+    """OR-merge instance masks for preview overlay."""
+    combined = np.zeros((orig_h, orig_w), dtype=np.uint8)
+    for mask in iter_instance_masks(masks):
+        if mask.shape[0] != orig_h or mask.shape[1] != orig_w:
+            mask_pil = Image.fromarray(mask).resize((orig_w, orig_h), Image.NEAREST)
+            mask = np.array(mask_pil)
+        combined = np.maximum(combined, mask)
+    return combined
+

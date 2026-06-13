@@ -130,14 +130,9 @@ class RegistryTagResolutionError(RuntimeError):
 
 
 def _ssl_context() -> ssl.SSLContext:
-    ctx = ssl.create_default_context()
-    try:
-        import certifi
+    from lai.http_fetch import ssl_context as _shared_ssl_context
 
-        ctx.load_verify_locations(certifi.where())
-    except ImportError:
-        pass
-    return ctx
+    return _shared_ssl_context()
 
 
 def _http_json(url: str, *, headers: dict[str, str] | None = None, timeout: float = 15.0) -> object | None:

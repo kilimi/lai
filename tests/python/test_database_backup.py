@@ -348,3 +348,69 @@ def test_import_rejects_zip_without_database_json(backup_client):
     )
     assert response.status_code == 400
     assert "database.json" in response.json()["detail"]
+
+
+def _patch_export_task_env(monkeypatch, tmp_path, Session):
+    """Run exports inline against the test DB and write files under tmp_path."""
+    from app import task_dispatch
+    from app.services import database_export_service
+
+    monkeypatch.setattr(task_dispatch, "ALLOW_INLINE_TASKS", True)
+    monkeypatch.setattr(
+        "app.routers.database_backup.use_celery_enabled",
+        lambda: False,
+    )
+    monkeypatch.setattr(database_export_service, "EXPORTS_ROOT", tmp_path / "exports")
+    monkeypatch.setattr(database_export_service, "SessionLocal", Session)
+
+
+def test_task_export_json_download(backup_client, tmp_path, monkeypatch):
+    test_client, Session = backup_client
+    _patch_export_task_env(monkeypatch, tmp_path, Session)
+
+    with Session() as db:
+        _seed_sample_database(db)
+
+    start = test_client.post(
+        "/database/export/start",
+        json={"include_files": False},
+    )
+    assert start.status_code == 200, start.text
+    body = start.json()
+    assert body["success"] is True
+    task_id = body["task_id"]
+
+    download = test_client.get(f"/database/export/download/{task_id}")
+    assert download.status_code == 200, download.text
+    assert download.headers["content-type"] == "application/json"
+    payload = json.loads(download.content.decode("utf-8"))
+    assert payload["data"]["projects"][0]["name"] == "Export Project"
+
+
+def test_task_export_zip_download(backup_client, tmp_path, monkeypatch):
+    test_client, Session = backup_client
+    _patch_export_task_env(monkeypatch, tmp_path, Session)
+
+    with Session() as db:
+        _seed_sample_database(db)
+
+    data_dir = tmp_path / "data" / "1"
+    data_dir.mkdir(parents=True)
+    sample_file = data_dir / "sample.jpg"
+    sample_file.write_bytes(b"fake-image-bytes")
+
+    start = test_client.post(
+        "/database/export/start",
+        json={"include_files": True},
+    )
+    assert start.status_code == 200, start.text
+    task_id = start.json()["task_id"]
+
+    download = test_client.get(f"/database/export/download/{task_id}")
+    assert download.status_code == 200, download.text
+    assert download.headers["content-type"] == "application/zip"
+
+    with zipfile.ZipFile(io.BytesIO(download.content), "r") as zf:
+        assert "database.json" in zf.namelist()
+        db_json = json.loads(zf.read("database.json").decode("utf-8"))
+        assert db_json["data"]["projects"][0]["name"] == "Export Project"
