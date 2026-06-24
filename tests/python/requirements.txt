@@ -1,21 +1,63 @@
 # Host dependencies for tests/python (pytest suite).
 # Python 3.10+
 #
-# From repo root (required — do not cd into tests/python first):
+# =============================================================================
+# Install (from repo root — directory that contains pyproject.toml)
+# =============================================================================
+#
+#   python -m venv .venv
+#   .venv\Scripts\activate          # Windows
+#   source .venv/bin/activate       # Linux / macOS
+#
+#   pip install -U pip
 #   pip install -r tests/python/requirements.txt
 #
-# Run tests:
-#   pytest tests/python/
-#   pytest tests/python -q -m "not training_smoke"    # skip GPU training matrix
+# Conda example (Windows):
 #
-# training_smoke / test_training_env also need Docker Compose and a healthy
-# worker-gpu container (see README_advanced.md). No extra pip packages for that.
+#   conda activate lai_local
+#   pip install -U pip
+#   pip install -r tests/python/requirements.txt
+#
+# =============================================================================
+# Run tests
+# =============================================================================
+#
+#   pytest tests/python/
+#   pytest tests/python -q -m "not training_smoke and not insid3_smoke"
+#
+# INSID3 mask helpers (host, no GPU):
+#   pytest tests/python/test_insid3_mask_utils.py tests/python/test_insid3_same_image.py::test_same_image_reference_mask_aligns_with_image_b64 -v
+#
+# INSID3 same-image inference smoke (delegates to sam_service container):
+#   docker compose up -d sam_service --force-recreate   # needs /tests mount + GPU profile
+#   pytest tests/python/test_insid3_same_image.py -m insid3_smoke -v
+#
+# GPU training smoke (worker-gpu container): see README_advanced.md
+#   set LAI_RUN_TRAINING_SMOKE=1
+#   pytest tests/python/test_training_smoke_all_models.py -m training_smoke -v
+#
+# =============================================================================
+# What needs Docker vs host pip
+# =============================================================================
+#
+# | Suite                         | pip install requirements.txt | Docker stack      |
+# |-------------------------------|------------------------------|-------------------|
+# | Most tests/python             | yes                          | no                |
+# | test_insid3_mask_utils        | yes                          | no                |
+# | test_insid3_same_image (unit) | yes                          | no                |
+# | test_insid3_same_image smoke  | yes (compose probe only)     | sam_service + GPU |
+# | training_smoke                | yes                          | worker-gpu + GPU  |
+#
+# conftest.py adds backend/ and backend/sam_service/ to PYTHONPATH automatically.
 
 # FastAPI app, SQLAlchemy, Celery, FiftyOne, OpenCV, Redis, etc.
 -r ../../backend/requirements-backend.txt
 
+# sam_service mask/polygon unit tests (numpy, pillow, opencv)
+-r requirements-sam-unit.txt
+
 # lai CLI package (wizard, registry, compose_files, compose_build tests)
-# Path is relative to your shell cwd — run pip from the repo root (directory with pyproject.toml).
+# Path is relative to your shell cwd — run pip from the repo root.
 -e .
 
 # Test runner
@@ -31,4 +73,5 @@ shapely>=2.0.0
 
 # Optional host GPU stack — uncomment to reduce skipped tests (heavy install).
 # Training smoke still runs inside worker-gpu via Docker when LAI_RUN_TRAINING_SMOKE=1.
+# INSID3 inference smoke runs inside sam_service; host torch is not required.
 # -r requirements-gpu-extras.txt

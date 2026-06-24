@@ -67,6 +67,20 @@ import { AnnotationMinimap } from '@/components/AnnotationMinimap';
 import { AnnotationStatusBar } from '@/components/AnnotationStatusBar';
 import { CompanionLayersPanel } from '@/components/annotation/CompanionLayersPanel';
 import {
+  useInsid3AnnotationIntegration,
+  type SegmentModelChoice,
+} from '@/components/annotation/Insid3SegmentationBridge';
+import { isInsid3MaskShape } from '@/components/annotation/useInsid3References';
+import { Sam3UnavailablePanel } from '@/components/annotation/Sam3UnavailablePanel';
+import {
+  Sam3ResultsDialog,
+  type Sam3ResultsDialogData,
+} from '@/components/annotation/Sam3ResultsDialog';
+import {
+  Insid3ResultsDialog,
+  type Insid3ResultsDialogData,
+} from '@/components/annotation/Insid3ResultsDialog';
+import {
   readCompanionDuplicateIds,
   readCopyOffCollectionIds,
 } from '@/components/annotation/companionDuplicatePrefs';
@@ -321,6 +335,13 @@ const ImageAnnotation = () => {
   const loadAnnotationsForImageRef = useRef<((name: string, forceCollectionId?: string) => Promise<void>) | null>(null);
   // COCO image dimensions (file_name -> { width, height }) so we can scale loaded coords to actual image space
   const cocoImageDimensionsRef = useRef<Record<string, { width: number; height: number }>>({});
+  const saveImageAnnotationsToDatabaseRef = useRef<
+    (
+      imageName: string,
+      annotationsToSave: AnnotationShape[],
+      dims?: { width: number; height: number },
+    ) => Promise<boolean>
+  >(async () => false);
 
   /**
    * Pixel space of stored polygon coordinates (same as API / file pixels).
@@ -393,13 +414,38 @@ const ImageAnnotation = () => {
   const samReadyAbortRef = useRef<AbortController | null>(null);
   const samSegmentAbortRef = useRef<AbortController | null>(null);
   const samReadyOverlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isSamInteractionBlocked = isSamModelLoading || isSamProcessing;
-  const showSamBlockingOverlay =
-    activeTool === 'auto-segment' &&
-    (isSamProcessing || (isSamModelLoading && showSamModelWaitOverlay));
-  const [segmentModel, setSegmentModel] = useState<'sam2' | 'sam3'>('sam2');
+  const [segmentModel, setSegmentModel] = useState<SegmentModelChoice>('sam2');
+  const [insid3RefKeys, setInsid3RefKeys] = useState<Set<string>>(new Set());
+  const [insid3HoverAnnotationId, setInsid3HoverAnnotationId] = useState<string | null>(null);
   const [segmentTextPrompt, setSegmentTextPrompt] = useState('');
   const [samMinArea, setSamMinArea] = useState<number>(100);
+  const [sam3ResultsOpen, setSam3ResultsOpen] = useState(false);
+  const [sam3ResultsData, setSam3ResultsData] = useState<Sam3ResultsDialogData | null>(null);
+  const showSam3Results = useCallback((data: Sam3ResultsDialogData) => {
+    setSam3ResultsData(data);
+    setSam3ResultsOpen(true);
+  }, []);
+  const [insid3ResultsOpen, setInsid3ResultsOpen] = useState(false);
+  const [insid3ResultsData, setInsid3ResultsData] = useState<Insid3ResultsDialogData | null>(null);
+  const [insid3ApplyClassId, setInsid3ApplyClassId] = useState<string | null>(null);
+  const [isInsid3ApplyingBatch, setIsInsid3ApplyingBatch] = useState(false);
+  const insid3PendingBatchRef = useRef<{
+    results: Record<string, Point[][]>;
+    classObj: AnnotationClass;
+  } | null>(null);
+  const showInsid3Results = useCallback((data: Insid3ResultsDialogData) => {
+    setInsid3ResultsData(data);
+    setInsid3ResultsOpen(true);
+    if (data.mode === 'batch' && data.defaultClassId) {
+      setInsid3ApplyClassId(data.defaultClassId);
+    }
+  }, []);
+  const isSamInteractionBlocked = isSamModelLoading || isSamProcessing;
+  const insid3SegmentActive = activeTool === 'auto-segment' && segmentModel === 'insid3';
+  const samSegmentActive = activeTool === 'auto-segment' && segmentModel !== 'insid3';
+  const showSamBlockingOverlay =
+    samSegmentActive &&
+    (isSamProcessing || (isSamModelLoading && showSamModelWaitOverlay));
 
   useEffect(() => {
     if (annotationMode === 'bbox' && (activeTool === 'polygon' || activeTool === 'pencil')) {
@@ -432,6 +478,7 @@ const ImageAnnotation = () => {
     }
   }, [annotationId, id, modeHint]);
 
+
   const { data: sam3Available = false } = useQuery({
     queryKey: ['sam3-available'],
     queryFn: async () => {
@@ -442,11 +489,6 @@ const ImageAnnotation = () => {
     retry: false,
   });
 
-  // When SAM 3 becomes unavailable, fall back to SAM 2
-  useEffect(() => {
-    if (!sam3Available && segmentModel === 'sam3') setSegmentModel('sam2');
-  }, [sam3Available, segmentModel]);
-
   const clearSamReadyOverlayTimer = useCallback(() => {
     if (samReadyOverlayTimerRef.current) {
       clearTimeout(samReadyOverlayTimerRef.current);
@@ -454,6 +496,30 @@ const ImageAnnotation = () => {
     }
     setShowSamModelWaitOverlay(false);
   }, []);
+
+  useEffect(() => {
+    if (segmentModel === 'insid3' && classes.length > 0) {
+      setActiveTool('auto-segment');
+    }
+    if (segmentModel === 'insid3' && activeTool === 'auto-segment') {
+      setSamPoints([]);
+      samPointsRef.current = [];
+      clearSamReadyOverlayTimer();
+      setIsSamModelLoading(false);
+    }
+  }, [segmentModel, activeTool, classes.length, clearSamReadyOverlayTimer]);
+
+  // Reset preview/points when switching between SAM and INSID3 (avoid stale overlays).
+  useEffect(() => {
+    setSamPoints([]);
+    samPointsRef.current = [];
+    setAutoSegmentPreview(null);
+    setIsSamProcessing(false);
+    samSegmentAbortRef.current?.abort();
+    samSegmentAbortRef.current = null;
+    clearSamReadyOverlayTimer();
+    setIsSamModelLoading(false);
+  }, [segmentModel, clearSamReadyOverlayTimer]);
 
   const cancelSamInteraction = useCallback(() => {
     samReadyAbortRef.current?.abort();
@@ -474,6 +540,14 @@ const ImageAnnotation = () => {
     if (activeTool !== 'auto-segment') {
       samReadyAbortRef.current?.abort();
       samReadyAbortRef.current = null;
+      clearSamReadyOverlayTimer();
+      setIsSamModelLoading(false);
+      return;
+    }
+
+    if (segmentModel === 'insid3' || segmentModel === 'sam3') {
+      // SAM 3 readiness comes from /ready/sam3 (react-query). INSID3 has its own panel.
+      // Do not block the canvas with SAM 2-style model warm-up polling.
       clearSamReadyOverlayTimer();
       setIsSamModelLoading(false);
       return;
@@ -563,7 +637,7 @@ const ImageAnnotation = () => {
         samReadyAbortRef.current = null;
       }
     };
-  }, [activeTool, segmentModel, toast, clearSamReadyOverlayTimer]);
+  }, [activeTool, segmentModel, sam3Available, toast, clearSamReadyOverlayTimer]);
 
   // Leaving AI Segment while a request is in flight should abort it.
   useEffect(() => {
@@ -683,6 +757,8 @@ const ImageAnnotation = () => {
   // Start auto-segmentation via backend SAM only.
   // label: 1 = add to mask (left-click), 0 = remove from mask (right-click).
   const startAutoSegment = useCallback(async (imgPoint: Point, label: number = 1) => {
+    if (segmentModel === 'insid3') return;
+    if (segmentModel === 'sam3' && !sam3Available) return;
     if (!displayImage && !currentImage) return;
     if (isSamModelLoading || isSamProcessing) return;
     const img = (displayImage || currentImage)!;
@@ -766,11 +842,21 @@ const ImageAnnotation = () => {
         rawPolygons[0].length >= 4 &&
         rawPolygons[0].length <= 5;
       if (isRectanglePlaceholder) {
-        toast({
-          title: 'SAM service needs update',
-          description: 'Segmentation returned a placeholder. Ensure the SAM service (backend) is running with a valid model.',
-          variant: 'destructive',
-        });
+        if (segmentModel === 'sam3') {
+          showSam3Results({
+            mode: 'preview',
+            outcome: 'error',
+            imageName: img.fileName,
+            message: 'SAM service returned a placeholder instead of real segmentation.',
+            detail: 'Ensure sam_service is running with SAM 3 weights loaded.',
+          });
+        } else {
+          toast({
+            title: 'SAM service needs update',
+            description: 'Segmentation returned a placeholder. Ensure the SAM service (backend) is running with a valid model.',
+            variant: 'destructive',
+          });
+        }
         return;
       }
       let polygons: Point[][] = rawPolygons.map((poly: number[][]) =>
@@ -780,11 +866,51 @@ const ImageAnnotation = () => {
         const scaleBack = 1 / sendScale;
         polygons = polygons.map(poly => poly.map(p => ({ x: p.x * scaleBack, y: p.y * scaleBack })));
       }
+      const polygonsBeforeMinArea = polygons;
       if (samMinArea > 0) {
         polygons = polygons.filter(poly => calculatePolygonArea(poly) >= samMinArea);
       }
+      const filteredOutCount = polygonsBeforeMinArea.length - polygons.length;
+      const imageSize =
+        imageRef.current && imageRef.current.naturalWidth > 0
+          ? {
+              width: imageRef.current.naturalWidth,
+              height: imageRef.current.naturalHeight,
+            }
+          : undefined;
+      const textPrompt =
+        segmentModel === 'sam3' && segmentTextPrompt.trim() ? segmentTextPrompt.trim() : null;
+
       if (polygons.length > 0 && polygons[0].length > 0) {
         setPreview(polygons, json.maskBase64);
+        if (segmentModel === 'sam3') {
+          showSam3Results({
+            mode: 'preview',
+            outcome: 'found',
+            imageName: img.fileName,
+            textPrompt,
+            pointCount: newPoints.length,
+            minArea: samMinArea,
+            filteredOutCount,
+            hasMask: Boolean(json.maskBase64),
+            imageSize,
+            regions: polygons.map((poly, i) => ({
+              index: i + 1,
+              vertices: poly.length,
+              areaPx: calculatePolygonArea(poly),
+            })),
+          });
+        }
+      } else if (segmentModel === 'sam3') {
+        showSam3Results({
+          mode: 'preview',
+          outcome: 'empty',
+          imageName: img.fileName,
+          textPrompt,
+          pointCount: newPoints.length,
+          minArea: samMinArea,
+          filteredOutCount: filteredOutCount > 0 ? filteredOutCount : undefined,
+        });
       } else {
         toast({
           title: 'No segmentation found',
@@ -796,16 +922,27 @@ const ImageAnnotation = () => {
       if (err instanceof DOMException && err.name === 'AbortError') {
         return;
       }
-      toast({
-        title: 'Segmentation failed',
-        description: 'Backend SAM is unavailable or failed. Ensure the SAM service is running.',
-        variant: 'destructive',
-      });
+      if (segmentModel === 'sam3') {
+        const img = (displayImage || currentImage)!;
+        showSam3Results({
+          mode: 'preview',
+          outcome: 'error',
+          imageName: img?.fileName,
+          message: 'Segmentation request failed.',
+          detail: 'Backend SAM is unavailable or timed out. Ensure sam_service is running.',
+        });
+      } else {
+        toast({
+          title: 'Segmentation failed',
+          description: 'Backend SAM is unavailable or failed. Ensure the SAM service is running.',
+          variant: 'destructive',
+        });
+      }
     } finally {
       setIsSamProcessing(false);
       samSegmentAbortRef.current = null;
     }
-  }, [displayImage, currentImage, classes, selectedClass, toast, samPoints, segmentModel, segmentTextPrompt, samMinArea, isSamModelLoading, isSamProcessing]);
+  }, [displayImage, currentImage, classes, selectedClass, toast, samPoints, segmentModel, segmentTextPrompt, samMinArea, isSamModelLoading, isSamProcessing, sam3Available, showSam3Results]);
 
   const acceptAutoSegment = () => {
     if (!autoSegmentPreview || !autoSegmentPreview.polygons || autoSegmentPreview.polygons.length === 0) return;
@@ -862,7 +999,15 @@ const ImageAnnotation = () => {
 
     setAutoSegmentPreview(null);
     setSamPoints([]); // Clear points so next click starts fresh for a new object
-    toast({ title: 'Auto-segment accepted', description: `Created ${newAnns.length} ${annotationMode === 'bbox' ? 'bounding boxes' : 'annotations'}` });
+    const annLabel = annotationMode === 'bbox' ? 'bounding box' : 'annotation';
+    const annLabelPlural = annotationMode === 'bbox' ? 'bounding boxes' : 'annotations';
+    toast({
+      title: segmentModel === 'sam3' ? 'SAM 3 applied' : 'Auto-segment accepted',
+      description:
+        newAnns.length === 1
+          ? `Added 1 ${annLabel}.`
+          : `Added ${newAnns.length} ${annLabelPlural}.`,
+    });
     computeGlobalStatsDebounced();
   };
 
@@ -2168,6 +2313,7 @@ const ImageAnnotation = () => {
 
     let addedCount = 0;
     let failCount = 0;
+    let imagesWithAnnotations = 0;
 
     for (let i = 0; i < mainColl.images.length; i++) {
       if (applyAllCancelledRef.current) break;
@@ -2220,6 +2366,7 @@ const ImageAnnotation = () => {
         }
         if (newAnns.length === 0) continue;
 
+        imagesWithAnnotations += 1;
         const merged = [...existing, ...newAnns];
         const dims =
           img.width && img.height ? { width: img.width, height: img.height } : undefined;
@@ -2249,10 +2396,17 @@ const ImageAnnotation = () => {
         if (currentImageName && mainColl.images.some((img) => img.fileName === currentImageName)) {
           loadAnnotationsForImage(currentImageName);
         }
-        toast({ title: 'Cancelled', description: `Applied ${addedCount} annotation(s) before cancel.` });
-      } else {
-        toast({ title: 'Cancelled', description: 'Apply on all images was cancelled.' });
       }
+      showSam3Results({
+        mode: 'batch',
+        outcome: 'cancelled',
+        textPrompt: segmentTextPrompt.trim(),
+        className: classObj.name,
+        totalImages: total,
+        imagesWithMatches,
+        annotationsAdded: addedCount,
+        failCount,
+      });
       return;
     }
 
@@ -2269,18 +2423,30 @@ const ImageAnnotation = () => {
     );
     computeGlobalStatsDebounced();
 
-    if (failCount > 0) {
-      toast({
-        title: 'Apply on all images',
-        description: `Added ${addedCount} annotations across images. ${failCount} image(s) failed.`,
-        variant: 'destructive',
+    if (addedCount === 0 && !wasCancelled) {
+      showSam3Results({
+        mode: 'batch',
+        outcome: 'empty',
+        textPrompt: segmentTextPrompt.trim(),
+        className: classObj.name,
+        totalImages: total,
+        imagesWithMatches: 0,
+        annotationsAdded: 0,
+        failCount,
       });
-    } else {
-      toast({
-        title: 'Apply on all images',
-        description: `Added ${addedCount} annotation(s) across ${total} image(s).`,
-      });
+      return;
     }
+
+    showSam3Results({
+      mode: 'batch',
+      outcome: 'complete',
+      textPrompt: segmentTextPrompt.trim(),
+      className: classObj.name,
+      totalImages: total,
+      imagesWithMatches,
+      annotationsAdded: addedCount,
+      failCount,
+    });
   }, [
     sam3Available,
     segmentModel,
@@ -2295,7 +2461,244 @@ const ImageAnnotation = () => {
     toast,
     loadAnnotationsForImage,
     computeGlobalStatsDebounced,
+    showSam3Results,
   ]);
+
+  const handleInsid3BatchApply = useCallback(
+    async (
+      results: Record<string, Point[][]>,
+      classObj: AnnotationClass,
+    ): Promise<{ addedCount: number; imagesDbSynced: number; imagesDbFailed: number }> => {
+      const collId = displayLayer || mainLayer || 'default';
+      const activeColl = imageCollections.find((c) => String(c.id) === collId);
+      if (!activeColl) return { addedCount: 0, imagesDbSynced: 0, imagesDbFailed: 0 };
+      let addedCount = 0;
+      let imagesDbSynced = 0;
+      let imagesDbFailed = 0;
+      const imagesToPersist: {
+        imageName: string;
+        merged: AnnotationShape[];
+        dims?: { width: number; height: number };
+      }[] = [];
+
+      for (const [imageName, polys] of Object.entries(results)) {
+        if (!polys.length) continue;
+        const storageKey = `annotations_${id}_${collId}_${imageName}`;
+        const raw = localStorage.getItem(storageKey);
+        const existing: AnnotationShape[] = raw ? JSON.parse(raw) : [];
+        const imgMeta = activeColl.images.find((img) => img.fileName === imageName);
+        const newAnns: AnnotationShape[] = [];
+        for (const poly of polys) {
+          if (poly.length < 3) continue;
+          if (samMinArea > 0 && calculatePolygonArea(poly) < samMinArea) continue;
+          newAnns.push({
+            id: `annotation_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`,
+            type: 'polygon',
+            points: poly,
+            label: classObj.name,
+            color: classObj.color,
+            visible: true,
+          });
+        }
+        if (newAnns.length === 0) continue;
+        const merged = [...existing, ...newAnns];
+        let dims =
+          imgMeta?.width && imgMeta?.height
+            ? { width: imgMeta.width, height: imgMeta.height }
+            : cocoImageDimensionsRef.current[imageName];
+        if (!dims) {
+          const dimsKey = `annotations_${id}_${collId}_${imageName}_dims`;
+          const savedDims = localStorage.getItem(dimsKey);
+          if (savedDims) {
+            try {
+              const parsed = JSON.parse(savedDims) as { width: number; height: number };
+              if (parsed.width > 0 && parsed.height > 0) {
+                dims = { width: parsed.width, height: parsed.height };
+              }
+            } catch {
+              /* ignore */
+            }
+          }
+        }
+        saveAnnotationsToLocalStorage(imageName, merged, dims);
+        imagesToPersist.push({ imageName, merged, dims });
+        addedCount += newAnns.length;
+      }
+
+      if (addedCount > 0) {
+        if (annotationId && api) {
+          for (const { imageName, merged, dims } of imagesToPersist) {
+            const ok = await saveImageAnnotationsToDatabaseRef.current(imageName, merged, dims);
+            if (ok) imagesDbSynced += 1;
+            else imagesDbFailed += 1;
+          }
+          if (imagesDbSynced > 0) {
+            await computeGlobalStats();
+          }
+        }
+
+        setHasUnsavedChanges(!annotationId || !api ? true : imagesDbFailed > 0);
+        setClasses((prev) => {
+          const updated = prev.map((c) =>
+            c.id === classObj.id ? { ...c, count: c.count + addedCount } : c,
+          );
+          saveGlobalClasses(updated);
+          return updated;
+        });
+        computeGlobalStatsDebounced();
+        if (currentImageName && results[currentImageName]) {
+          lastLoadedAnnotationKeyRef.current = '';
+          await loadAnnotationsForImage(currentImageName);
+        }
+      }
+      return { addedCount, imagesDbSynced, imagesDbFailed };
+    },
+    [
+      imageCollections,
+      mainLayer,
+      displayLayer,
+      id,
+      annotationId,
+      api,
+      samMinArea,
+      saveAnnotationsToLocalStorage,
+      currentImageName,
+      loadAnnotationsForImage,
+      computeGlobalStatsDebounced,
+      computeGlobalStats,
+    ],
+  );
+
+  const handleInsid3BatchReady = useCallback(
+    (
+      results: Record<string, Point[][]>,
+      classObj: AnnotationClass,
+      dialogData: Insid3ResultsDialogData,
+    ) => {
+      insid3PendingBatchRef.current = { results, classObj };
+      setInsid3ApplyClassId(classObj.id);
+      showInsid3Results(dialogData);
+    },
+    [showInsid3Results],
+  );
+
+  const handleInsid3ApplyFromDialog = useCallback(async () => {
+    const pending = insid3PendingBatchRef.current;
+    if (!pending) return;
+    const classId = insid3ApplyClassId ?? pending.classObj.id;
+    const classObj = classes.find((c) => c.id === classId);
+    if (!classObj) {
+      toast({
+        title: 'Select a class',
+        description: 'Choose which class to assign to the new annotations.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    setIsInsid3ApplyingBatch(true);
+    try {
+      const { addedCount, imagesDbSynced, imagesDbFailed } = await handleInsid3BatchApply(
+        pending.results,
+        classObj,
+      );
+      insid3PendingBatchRef.current = null;
+      setInsid3ResultsData((prev) => {
+        if (!prev || prev.mode !== 'batch') return prev;
+        return {
+          ...prev,
+          applied: true,
+          annotationsAdded: addedCount,
+          className: classObj.name,
+          defaultClassId: classObj.id,
+        };
+      });
+      if (addedCount > 0) {
+        const dbNote =
+          annotationId && api
+            ? imagesDbFailed > 0
+              ? ` Saved to database for ${imagesDbSynced} image(s); ${imagesDbFailed} failed.`
+              : ` Saved to database for ${imagesDbSynced} image(s).`
+            : '';
+        toast({
+          title: 'INSID3 annotations added',
+          description: `Added ${addedCount} annotation${addedCount === 1 ? '' : 's'} as "${classObj.name}".${dbNote}`,
+          variant: imagesDbFailed > 0 ? 'destructive' : 'default',
+        });
+      } else {
+        toast({
+          title: 'Nothing added',
+          description: 'No annotations could be saved. Try a different class or check layer settings.',
+          variant: 'destructive',
+        });
+      }
+    } finally {
+      setIsInsid3ApplyingBatch(false);
+    }
+  }, [classes, insid3ApplyClassId, handleInsid3BatchApply, toast, annotationId, api]);
+
+  const handleInsid3ReferencesChange = useCallback((refs: { imageName: string; annotationId: string }[]) => {
+    setInsid3RefKeys(new Set(refs.map((r) => `${r.imageName}::${r.annotationId}`)));
+  }, []);
+
+  const resolveInsid3ReferenceParams = useCallback(
+    (fileName: string) => {
+      if (annotationLayerId && fileName === currentImageName) {
+        const annotColl = imageCollections.find((c) => String(c.id) === annotationLayerId);
+        const annotImg = annotColl?.images.find((i) => i.fileName === fileName);
+        if (annotImg && annotImg.width > 0 && annotImg.height > 0) {
+          return { imageUrl: annotImg.url, width: annotImg.width, height: annotImg.height };
+        }
+      }
+      const dims = getAnnotReferenceDimensions(fileName);
+      if (fileName === currentImageName) {
+        return {
+          imageUrl: displayImage?.url || currentImage?.url,
+          width: dims?.width ?? displayImage?.width ?? currentImage?.width,
+          height: dims?.height ?? displayImage?.height ?? currentImage?.height,
+        };
+      }
+      return dims ? { width: dims.width, height: dims.height } : undefined;
+    },
+    [
+      annotationLayerId,
+      currentImageName,
+      imageCollections,
+      getAnnotReferenceDimensions,
+      displayImage,
+      currentImage,
+    ],
+  );
+
+  const insid3LayerImageFileNames = useMemo(() => {
+    const collId = displayLayer || mainLayer;
+    if (!collId) return [];
+    const coll = imageCollections.find((c) => String(c.id) === String(collId));
+    return coll?.images.map((img) => img.fileName) ?? [];
+  }, [displayLayer, mainLayer, imageCollections]);
+
+  const insid3Integration = useInsid3AnnotationIntegration({
+    enabled: activeTool === 'auto-segment' && segmentModel === 'insid3',
+    classes,
+    selectedClass,
+    onSelectedClassChange: setSelectedClass,
+    currentImageName,
+    currentImageUrl: displayImage?.url || currentImage?.url,
+    currentImageWidth: displayImage?.width || currentImage?.width,
+    currentImageHeight: displayImage?.height || currentImage?.height,
+    resolveReferenceParams: resolveInsid3ReferenceParams,
+    canCaptureReferenceFromCanvas: !annotationLayerId || annotationLayerId === (displayLayer || mainLayer),
+    annotations,
+    datasetId: id,
+    projectId,
+    collectionId: displayLayer || mainLayer || undefined,
+    layerImageFileNames: insid3LayerImageFileNames,
+    samMinArea,
+    imageRef,
+    onReferencesChange: handleInsid3ReferencesChange,
+    onBatchReady: handleInsid3BatchReady,
+    onShowResults: showInsid3Results,
+    toast,
+  });
 
   // Recompute global stats whenever we have changes to class list, image list or storage updates
   useEffect(() => {
@@ -2989,8 +3392,8 @@ const ImageAnnotation = () => {
     return inside;
   }, []);
 
-  // Find annotation at given point (x,y are in natural image space)
-  const findAnnotationAtPoint = useCallback((x: number, y: number): AnnotationShape | null => {
+  // Find annotation at given point (x,y are in natural image space). topMost: last-drawn wins.
+  const findAnnotationAtPoint = useCallback((x: number, y: number, topMost = false): AnnotationShape | null => {
     // Convert click coords from display space to annotation storage space
     let qx = x, qy = y;
     const sa = annotScaleToAnnotRef.current;
@@ -3008,7 +3411,8 @@ const ImageAnnotation = () => {
         qy = y * (refDims.height / nh);
       }
     }
-    for (const annotation of annotations) {
+    const ordered = topMost ? [...annotations].reverse() : annotations;
+    for (const annotation of ordered) {
       if (!annotation.visible) continue;
 
       if (annotation.type === 'polygon') {
@@ -3016,8 +3420,8 @@ const ImageAnnotation = () => {
           return annotation;
         }
       } else if (annotation.type === 'rectangle' && annotation.points.length >= 2) {
-        const [x, y, w, h] = pointsToBbox(annotation.points);
-        if (qx >= x && qx <= x + w && qy >= y && qy <= y + h) {
+        const [rx, ry, w, h] = pointsToBbox(annotation.points);
+        if (qx >= rx && qx <= rx + w && qy >= ry && qy <= ry + h) {
           return annotation;
         }
       }
@@ -3098,6 +3502,13 @@ const ImageAnnotation = () => {
 
     // If Auto tool is active, trigger backend segmentation for the clicked image point
     if (activeTool === 'auto-segment') {
+      if (segmentModel === 'insid3') {
+        if (e.button !== 0 || isPanningRef.current) return;
+        const clickedAnnotation = findAnnotationAtPoint(imageCoords.x, imageCoords.y, true);
+        insid3Integration.handleAnnotationPick(clickedAnnotation);
+        setSelectedAnnotation(clickedAnnotation?.id || null);
+        return;
+      }
       if (isSamModelLoading || isSamProcessing) {
         e.preventDefault();
         e.stopPropagation();
@@ -3180,7 +3591,7 @@ const ImageAnnotation = () => {
       setIsDrawing(true);
       setCurrentPath([imageCoords, imageCoords]);
     }
-  }, [activeTool, selectedClass, classes.length, isDrawing, screenToImageCoords, findAnnotationAtPoint, startAutoSegment, toast, isSamModelLoading, isSamProcessing]);
+  }, [activeTool, selectedClass, classes.length, isDrawing, screenToImageCoords, findAnnotationAtPoint, startAutoSegment, toast, isSamModelLoading, isSamProcessing, segmentModel, insid3Integration]);
 
   const handleCanvasMouseMove = useCallback((e: React.MouseEvent) => {
     if (!canvasRef.current || !currentImage) return;
@@ -3188,6 +3599,20 @@ const ImageAnnotation = () => {
     // Track cursor position in image coordinates for status bar
     const imageCoords = screenToImageCoords(e.clientX, e.clientY);
     setCursorImagePosition(imageCoords);
+
+    if (
+      activeTool === 'auto-segment' &&
+      segmentModel === 'insid3' &&
+      !isPanningRef.current &&
+      !isDrawing
+    ) {
+      const hovered = findAnnotationAtPoint(imageCoords.x, imageCoords.y);
+      const hoverId =
+        hovered && insid3Integration.isPickableAnnotation(hovered) ? hovered.id : null;
+      setInsid3HoverAnnotationId((prev) => (prev === hoverId ? prev : hoverId));
+    } else if (insid3HoverAnnotationId) {
+      setInsid3HoverAnnotationId(null);
+    }
 
     // Free-hand pencil: while the mouse is down and pencil is the active
     // tool, sample points along the cursor path. We thin the stream so we
@@ -3293,7 +3718,13 @@ const ImageAnnotation = () => {
       
       setMoveOffset(imageCoords);
     }
-  }, [isDragging, dragStart, isMovingAnnotation, selectedAnnotation, moveOffset, screenToImageCoords, currentImage, isDrawing, activeTool, id, currentImageName, annotationStorageCollId, saveAnnotationsToLocalStorage, getAnnotReferenceDimensions, annotationId]);
+  }, [isDragging, dragStart, isMovingAnnotation, selectedAnnotation, moveOffset, screenToImageCoords, currentImage, isDrawing, activeTool, id, currentImageName, annotationStorageCollId, saveAnnotationsToLocalStorage, getAnnotReferenceDimensions, annotationId, segmentModel, findAnnotationAtPoint, insid3Integration, insid3HoverAnnotationId]);
+
+  useEffect(() => {
+    if (segmentModel !== 'insid3' || activeTool !== 'auto-segment') {
+      setInsid3HoverAnnotationId(null);
+    }
+  }, [segmentModel, activeTool]);
 
   const handleCanvasMouseUp = useCallback(() => {
     if (isPanningRef.current) {
@@ -3357,7 +3788,7 @@ const ImageAnnotation = () => {
     }
 
     // Right-click for SAM is handled in handleCanvasMouseDown (e.button === 2); prevent context menu when SAM is active
-    if (activeTool === 'auto-segment') {
+    if (activeTool === 'auto-segment' && segmentModel !== 'insid3') {
       e.preventDefault();
       return;
     }
@@ -3649,6 +4080,73 @@ const ImageAnnotation = () => {
         ctx.fillText(annotation.label, centerScreen.x, centerScreen.y);
       }
 
+      // INSID3: highlight pickable masks (dashed) and saved references (gold)
+      const insid3Picking =
+        activeTool === 'auto-segment' &&
+        segmentModel === 'insid3' &&
+        insid3Integration.targetClassName;
+      if (
+        insid3Picking &&
+        isInsid3MaskShape(annotation)
+      ) {
+        const isRef =
+          currentImageName &&
+          insid3RefKeys.has(`${currentImageName}::${annotation.id}`);
+        const isHovered = annotation.id === insid3HoverAnnotationId;
+        if (!isRef) {
+          ctx.save();
+          ctx.setLineDash([5, 4]);
+          ctx.strokeStyle = isHovered ? '#38bdf8' : '#94a3b8';
+          ctx.lineWidth = isHovered ? 3 : 2;
+          if (annotation.type === 'polygon' && annotation.points.length > 2) {
+            ctx.beginPath();
+            const firstPoint = annotationToScreen(annotation.points[0].x, annotation.points[0].y);
+            ctx.moveTo(firstPoint.x, firstPoint.y);
+            for (let i = 1; i < annotation.points.length; i++) {
+              const point = annotationToScreen(annotation.points[i].x, annotation.points[i].y);
+              ctx.lineTo(point.x, point.y);
+            }
+            ctx.closePath();
+            ctx.stroke();
+          } else if (annotation.type === 'rectangle' && annotation.points.length >= 2) {
+            const [bx, by, bw, bh] = pointsToBbox(annotation.points);
+            const topLeft = annotationToScreen(bx, by);
+            const bottomRight = annotationToScreen(bx + bw, by + bh);
+            ctx.strokeRect(
+              topLeft.x,
+              topLeft.y,
+              bottomRight.x - topLeft.x,
+              bottomRight.y - topLeft.y,
+            );
+          }
+          ctx.restore();
+        }
+      }
+
+      // INSID3 reference basket highlight (gold dashed)
+      if (
+        segmentModel === 'insid3' &&
+        currentImageName &&
+        insid3RefKeys.has(`${currentImageName}::${annotation.id}`)
+      ) {
+        ctx.save();
+        ctx.setLineDash([6, 4]);
+        ctx.strokeStyle = '#FFB347';
+        ctx.lineWidth = 2;
+        if (annotation.type === 'polygon' && annotation.points.length > 2) {
+          ctx.beginPath();
+          const firstPoint = annotationToScreen(annotation.points[0].x, annotation.points[0].y);
+          ctx.moveTo(firstPoint.x, firstPoint.y);
+          for (let i = 1; i < annotation.points.length; i++) {
+            const point = annotationToScreen(annotation.points[i].x, annotation.points[i].y);
+            ctx.lineTo(point.x, point.y);
+          }
+          ctx.closePath();
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+
       // Highlight selected annotation
       if (annotation.id === selectedAnnotation) {
         ctx.strokeStyle = '#FFD700';
@@ -3738,7 +4236,7 @@ const ImageAnnotation = () => {
     }
 
     // SAM points (positive = green, negative = red) when auto-segment tool is active
-    if (activeTool === 'auto-segment' && samPoints.length > 0) {
+    if (activeTool === 'auto-segment' && segmentModel !== 'insid3' && samPoints.length > 0) {
       samPoints.forEach((p) => {
         const screenPoint = imageToScreenCoords(p.x, p.y);
         ctx.beginPath();
@@ -3755,7 +4253,7 @@ const ImageAnnotation = () => {
     ctx.restore();
     lastDrawnVisibleAnnotationsRef.current = drawnVisibleAnnotations;
     lastDrawImageKeyRef.current = currentImage?.fileName || currentImageNameRef.current || '';
-  }, [annotations, selectedAnnotation, isDrawing, currentPath, activeTool, selectedClass, classes, soloClassId, samPoints, imageScale, imageOffset, displayImage, currentImage, annotationLayerId, imageCollections, imageBrightness, imageContrast, imageSaturation, getAnnotReferenceDimensions, annotationId]);
+  }, [annotations, selectedAnnotation, isDrawing, currentPath, activeTool, selectedClass, classes, soloClassId, samPoints, imageScale, imageOffset, displayImage, currentImage, annotationLayerId, imageCollections, imageBrightness, imageContrast, imageSaturation, getAnnotReferenceDimensions, annotationId, segmentModel, insid3RefKeys, insid3HoverAnnotationId, insid3Integration.targetClassName, currentImageName]);
 
   // Redraw canvas when dependencies change
   useEffect(() => {
@@ -5145,6 +5643,208 @@ const ImageAnnotation = () => {
     }
   };
 
+  // Save annotations for one image to database (PATCH per image + collection mirrors).
+  const saveImageAnnotationsToDatabase = useCallback(
+    async (
+      imageName: string,
+      annotationsToSave: AnnotationShape[],
+      dims?: { width: number; height: number },
+    ): Promise<boolean> => {
+      if (!annotationId || !api || !id || !imageName) {
+        return false;
+      }
+
+      try {
+        const imageWidth =
+          dims?.width ||
+          cocoImageDimensionsRef.current[imageName]?.width ||
+          (imageName === currentImageName
+            ? (displayImage as { naturalWidth?: number })?.naturalWidth ||
+              (currentImage as { naturalWidth?: number })?.naturalWidth ||
+              0
+            : 0);
+        const imageHeight =
+          dims?.height ||
+          cocoImageDimensionsRef.current[imageName]?.height ||
+          (imageName === currentImageName
+            ? (displayImage as { naturalHeight?: number })?.naturalHeight ||
+              (currentImage as { naturalHeight?: number })?.naturalHeight ||
+              0
+            : 0);
+
+        const shapesToApiPayload = (shapes: AnnotationShape[]) =>
+          shapes
+            .filter((ann) => (ann.type === 'polygon' || ann.type === 'rectangle') && !!ann.points?.length)
+            .map((ann, idx) => {
+              const [minX, minY, width, height] = pointsToBbox(ann.points);
+              const categoryId = (classes.findIndex((c) => c.name === ann.label) + 1) || 1;
+              const segmentation =
+                ann.type === 'polygon' ? [ann.points.flatMap((p) => [p.x, p.y])] : [];
+              const area =
+                ann.type === 'polygon' ? calculatePolygonArea(ann.points) : width * height;
+              return {
+                id: idx + 1,
+                image_id: 1,
+                category_id: categoryId,
+                category_name: ann.label,
+                segmentation,
+                bbox: [minX, minY, width, height],
+                area,
+                iscrowd: 0,
+              };
+            });
+
+        const annotationsData = shapesToApiPayload(annotationsToSave);
+        const activeCollId = getActiveCollectionId();
+        const url = patchAnnotationImageUrl(id, annotationId, imageName);
+
+        const patchCollection = async (
+          collectionId: string,
+          payload: ReturnType<typeof shapesToApiPayload>,
+        ): Promise<boolean> => {
+          const numericCollectionId = Number(collectionId);
+          const response = await fetch(url, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              annotations: payload,
+              image_width: imageWidth,
+              image_height: imageHeight,
+              ...(Number.isFinite(numericCollectionId)
+                ? { collection_id: numericCollectionId }
+                : {}),
+            }),
+          });
+          const data = await response.json();
+          return response.ok && data.success;
+        };
+
+        const collectionTargets = new Map<string, ReturnType<typeof shapesToApiPayload>>();
+        collectionTargets.set(String(activeCollId), annotationsData);
+
+        for (const dupId of readCompanionDuplicateIds()) {
+          if (String(dupId) === String(activeCollId)) continue;
+          collectionTargets.set(String(dupId), annotationsData);
+        }
+
+        for (const offId of readCopyOffCollectionIds()) {
+          if (String(offId) === String(activeCollId)) continue;
+          collectionTargets.set(String(offId), []);
+        }
+
+        let allOk = true;
+        for (const [collId, payload] of collectionTargets) {
+          const ok = await patchCollection(collId, payload);
+          if (!ok) allOk = false;
+        }
+
+        if (!allOk) {
+          console.error('Failed to save image annotations for', imageName);
+          return false;
+        }
+
+        const saveDims =
+          imageWidth > 0 && imageHeight > 0
+            ? { width: imageWidth, height: imageHeight }
+            : dims;
+        saveAnnotationsToLocalStorage(imageName, annotationsToSave, saveDims);
+
+        try {
+          const annotationFileRef = sessionStorage.getItem(`annotation_file_${id}`);
+          if (annotationFileRef) {
+            const fileData = JSON.parse(annotationFileRef);
+            const cocoData = fileData.cocoData;
+
+            if (cocoData?.annotations && cocoData?.images) {
+              const imageEntry = findCocoImageForDatasetName(cocoData.images, imageName);
+              if (imageEntry) {
+                const existingCategoryNames = new Set(
+                  cocoData.categories?.map((c: { name: string }) => c.name) || [],
+                );
+                classes.forEach((cls) => {
+                  if (!existingCategoryNames.has(cls.name)) {
+                    const maxCategoryId = Math.max(
+                      0,
+                      ...(cocoData.categories?.map((c: { id: number }) => c.id) || [0]),
+                    );
+                    cocoData.categories = cocoData.categories || [];
+                    cocoData.categories.push({
+                      id: maxCategoryId + 1,
+                      name: cls.name,
+                      supercategory: '',
+                    });
+                  }
+                });
+
+                const categoryNameToId: Record<string, number> = {};
+                cocoData.categories?.forEach((cat: { name: string; id: number }) => {
+                  categoryNameToId[cat.name] = cat.id;
+                });
+
+                cocoData.annotations = cocoData.annotations.filter(
+                  (ann: { image_id: number }) => ann.image_id !== imageEntry.id,
+                );
+
+                let nextAnnId =
+                  Math.max(0, ...cocoData.annotations.map((a: { id?: number }) => a.id || 0)) + 1;
+                annotationsToSave.forEach((ann) => {
+                  if (ann.type === 'polygon' || ann.type === 'rectangle') {
+                    const [minX, minY, width, height] = pointsToBbox(ann.points);
+                    const categoryId = categoryNameToId[ann.label] || 1;
+                    const segmentation =
+                      ann.type === 'polygon' ? [ann.points.flatMap((p) => [p.x, p.y])] : [];
+                    const area =
+                      ann.type === 'polygon'
+                        ? calculatePolygonArea(ann.points)
+                        : width * height;
+                    cocoData.annotations.push({
+                      id: nextAnnId++,
+                      image_id: imageEntry.id,
+                      category_id: categoryId,
+                      segmentation,
+                      bbox: [minX, minY, width, height],
+                      area,
+                      iscrowd: 0,
+                    });
+                  }
+                });
+
+                fileData.cocoData = cocoData;
+                sessionStorage.setItem(`annotation_file_${id}`, JSON.stringify(fileData));
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('Could not update sessionStorage for', imageName, e);
+        }
+
+        if (imageWidth > 0 && imageHeight > 0) {
+          cocoImageDimensionsRef.current[imageName] = { width: imageWidth, height: imageHeight };
+        }
+
+        return true;
+      } catch (error) {
+        console.error('Error saving image annotations:', imageName, error);
+        return false;
+      }
+    },
+    [
+      annotationId,
+      api,
+      id,
+      classes,
+      getActiveCollectionId,
+      saveAnnotationsToLocalStorage,
+      currentImageName,
+      displayImage,
+      currentImage,
+    ],
+  );
+
+  useEffect(() => {
+    saveImageAnnotationsToDatabaseRef.current = saveImageAnnotationsToDatabase;
+  }, [saveImageAnnotationsToDatabase]);
+
   // Save current image annotations to database (single image only)
   const saveCurrentImageToDatabase = useCallback(async (
     overrideAnnotations?: AnnotationShape[],
@@ -5153,181 +5853,28 @@ const ImageAnnotation = () => {
       return false;
     }
 
-    // Allow callers (e.g. "Delete all annotations") to bypass the stale
-    // `annotations` closure by passing the authoritative list explicitly.
     const annotationsToSave = overrideAnnotations ?? annotations;
+    const img = displayImage || currentImage;
+    const imageWidth = (img as { naturalWidth?: number })?.naturalWidth || 0;
+    const imageHeight = (img as { naturalHeight?: number })?.naturalHeight || 0;
+    const dims =
+      imageWidth > 0 && imageHeight > 0 ? { width: imageWidth, height: imageHeight } : undefined;
 
-    try {
-      // Get current image dimensions
-      const img = displayImage || currentImage;
-      const imageWidth = (img as any)?.naturalWidth || 0;
-      const imageHeight = (img as any)?.naturalHeight || 0;
-
-      // Convert annotations to COCO format for this image
-      const shapesToApiPayload = (shapes: AnnotationShape[]) =>
-        shapes
-          .filter((ann) => (ann.type === 'polygon' || ann.type === 'rectangle') && !!ann.points?.length)
-          .map((ann, idx) => {
-            const [minX, minY, width, height] = pointsToBbox(ann.points);
-            const categoryId = (classes.findIndex(c => c.name === ann.label) + 1) || 1;
-            const segmentation = ann.type === 'polygon' ? [ann.points.flatMap((p) => [p.x, p.y])] : [];
-            const area = ann.type === 'polygon' ? calculatePolygonArea(ann.points) : width * height;
-            return {
-              id: idx + 1,
-              image_id: 1,
-              category_id: categoryId,
-              category_name: ann.label,
-              segmentation,
-              bbox: [minX, minY, width, height],
-              area,
-              iscrowd: 0,
-            };
-          });
-
-      const annotationsData = shapesToApiPayload(annotationsToSave);
-
-      const activeCollId = getActiveCollectionId();
-      const url = patchAnnotationImageUrl(id!, annotationId!, currentImageName);
-
-      const patchCollection = async (
-        collectionId: string,
-        payload: typeof annotationsData,
-      ): Promise<boolean> => {
-        const numericCollectionId = Number(collectionId);
-        const response = await fetch(url, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            annotations: payload,
-            image_width: imageWidth,
-            image_height: imageHeight,
-            ...(Number.isFinite(numericCollectionId)
-              ? { collection_id: numericCollectionId }
-              : {}),
-          }),
-        });
-        const data = await response.json();
-        return response.ok && data.success;
-      };
-
-      const collectionTargets = new Map<string, typeof annotationsData>();
-      collectionTargets.set(String(activeCollId), annotationsData);
-
-      for (const dupId of readCompanionDuplicateIds()) {
-        if (String(dupId) === String(activeCollId)) continue;
-        collectionTargets.set(String(dupId), annotationsData);
-      }
-
-      for (const offId of readCopyOffCollectionIds()) {
-        if (String(offId) === String(activeCollId)) continue;
-        collectionTargets.set(String(offId), []);
-      }
-
-      let allOk = true;
-      for (const [collId, payload] of collectionTargets) {
-        const ok = await patchCollection(collId, payload);
-        if (!ok) allOk = false;
-      }
-
-      const response = { ok: allOk };
-      const data = { success: allOk };
-
-      if (response.ok && data.success) {
-        console.log('Image annotations saved:', data);
-
-        const saveDims =
-          imageWidth > 0 && imageHeight > 0
-            ? { width: imageWidth, height: imageHeight }
-            : imageRef.current?.naturalWidth && imageRef.current?.naturalHeight
-              ? {
-                  width: imageRef.current.naturalWidth,
-                  height: imageRef.current.naturalHeight,
-                }
-              : undefined;
-        saveAnnotationsToLocalStorage(currentImageName, annotationsToSave, saveDims);
-        
-        // Update sessionStorage COCO data to reflect the saved changes
-        try {
-          const annotationFileRef = sessionStorage.getItem(`annotation_file_${id}`);
-          if (annotationFileRef) {
-            const fileData = JSON.parse(annotationFileRef);
-            const cocoData = fileData.cocoData;
-            
-            if (cocoData && cocoData.annotations && cocoData.images) {
-              // Find the image ID for this image name
-              const imageEntry = findCocoImageForDatasetName(cocoData.images, currentImageName);
-              if (imageEntry) {
-                // Update categories to include all current classes
-                const existingCategoryNames = new Set(cocoData.categories?.map((c: any) => c.name) || []);
-                classes.forEach((cls, idx) => {
-                  if (!existingCategoryNames.has(cls.name)) {
-                    // Add new category with next available ID
-                    const maxCategoryId = Math.max(0, ...(cocoData.categories?.map((c: any) => c.id) || [0]));
-                    cocoData.categories = cocoData.categories || [];
-                    cocoData.categories.push({
-                      id: maxCategoryId + 1,
-                      name: cls.name,
-                      supercategory: ""
-                    });
-                    console.log(`Added new category to sessionStorage: ${cls.name} with id ${maxCategoryId + 1}`);
-                  }
-                });
-                
-                // Build a category name to ID map for annotation category_id lookup
-                const categoryNameToId: { [name: string]: number } = {};
-                cocoData.categories?.forEach((cat: any) => {
-                  categoryNameToId[cat.name] = cat.id;
-                });
-                
-                // Remove old annotations for this image
-                cocoData.annotations = cocoData.annotations.filter((ann: any) => ann.image_id !== imageEntry.id);
-                
-                // Add new annotations with proper COCO format
-                let nextAnnId = Math.max(0, ...cocoData.annotations.map((a: any) => a.id || 0)) + 1;
-                annotationsToSave.forEach((ann) => {
-                  if (ann.type === 'polygon' || ann.type === 'rectangle') {
-                    const [minX, minY, width, height] = pointsToBbox(ann.points);
-                    // Use category ID from the COCO categories, not from frontend index
-                    const categoryId = categoryNameToId[ann.label] || 1;
-                    const segmentation = ann.type === 'polygon' ? [ann.points.flatMap((p) => [p.x, p.y])] : [];
-                    const area = ann.type === 'polygon' ? calculatePolygonArea(ann.points) : width * height;
-                    cocoData.annotations.push({
-                      id: nextAnnId++,
-                      image_id: imageEntry.id,
-                      category_id: categoryId,
-                      segmentation,
-                      bbox: [minX, minY, width, height],
-                      area,
-                      iscrowd: 0
-                    });
-                  }
-                });
-                
-                // Save back to sessionStorage
-                fileData.cocoData = cocoData;
-                sessionStorage.setItem(`annotation_file_${id}`, JSON.stringify(fileData));
-                console.log(`Updated sessionStorage with ${annotationsToSave.length} annotations for ${currentImageName}`);
-
-                
-                // Recompute global statistics to reflect the changes
-                await computeGlobalStats();
-              }
-            }
-          }
-        } catch (e) {
-          console.warn('Could not update sessionStorage:', e);
-        }
-        
-        return true;
-      } else {
-        console.error('Failed to save image annotations:', data.error || data.detail);
-        return false;
-      }
-    } catch (error) {
-      console.error('Error saving image annotations:', error);
-      return false;
+    const ok = await saveImageAnnotationsToDatabase(currentImageName, annotationsToSave, dims);
+    if (ok) {
+      await computeGlobalStats();
     }
-  }, [annotationId, api, currentImageName, annotations, displayImage, currentImage, classes, id, getActiveCollectionId, saveAnnotationsToLocalStorage]);
+    return ok;
+  }, [
+    annotationId,
+    api,
+    currentImageName,
+    annotations,
+    displayImage,
+    currentImage,
+    saveImageAnnotationsToDatabase,
+    computeGlobalStats,
+  ]);
 
   // Auto-save function with debouncing
   const autoSaveToDatabase = useCallback(async () => {
@@ -6444,9 +6991,11 @@ const ImageAnnotation = () => {
                   setActiveTool('auto-segment');
                   setSamPoints([]);
                 }}
-                disabled={isSamInteractionBlocked}
+                disabled={!insid3SegmentActive && isSamInteractionBlocked}
                 title={
-                  isSamModelLoading
+                  insid3SegmentActive
+                    ? 'INSID3 — click masks on the image to add references (G)'
+                    : isSamModelLoading
                     ? 'Waiting for SAM model...'
                     : isSamProcessing
                     ? 'Processing segmentation...'
@@ -6455,7 +7004,7 @@ const ImageAnnotation = () => {
                     : 'AI Segment — click on image to segment (G)'
                 }
               >
-                {isSamInteractionBlocked ? (
+                {!insid3SegmentActive && isSamInteractionBlocked ? (
                   <>
                     <Loader2 className="w-4 h-4 mr-1 animate-spin" />
                     <span className="flex-1 text-left">{isSamModelLoading ? 'Loading model...' : 'Processing...'}</span>
@@ -6468,7 +7017,7 @@ const ImageAnnotation = () => {
                   </>
                 )}
               </Button>
-              {activeTool === 'auto-segment' && samPoints.length > 0 && (
+              {samSegmentActive && samPoints.length > 0 && (
                 <Button
                   variant="ghost"
                   size="sm"
@@ -6499,8 +7048,8 @@ const ImageAnnotation = () => {
               <Label className="text-xs text-muted-foreground">Segment with</Label>
               <Select
                 value={segmentModel}
-                onValueChange={(v: 'sam2' | 'sam3') => setSegmentModel(v)}
-                disabled={classes.length === 0 || isSamInteractionBlocked}
+                onValueChange={(v: SegmentModelChoice) => setSegmentModel(v)}
+                disabled={classes.length === 0 || (!insid3SegmentActive && isSamInteractionBlocked) || insid3Integration.isInsid3Busy}
               >
                 <SelectTrigger
                   className="h-8 text-xs bg-muted border-border mt-1"
@@ -6510,21 +7059,16 @@ const ImageAnnotation = () => {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="sam2">SAM 2 (point)</SelectItem>
-                  <SelectItem
-                    value="sam3"
-                    disabled={!sam3Available}
-                    title={
-                      !sam3Available
-                        ? 'SAM 3: set SAM3_MODELS_HOST_PATH + SAM3_CHECKPOINT_FILENAME in .env (run lai install), or SAM3_ALLOW_HF_DOWNLOAD=true + HF_TOKEN'
-                        : undefined
-                    }
-                  >
-                    SAM 3 (point / text){!sam3Available ? ' — not available' : ''}
+                  <SelectItem value="sam3">SAM 3 (point / text)</SelectItem>
+                  <SelectItem value="insid3">
+                    From example (INSID3)
                   </SelectItem>
                 </SelectContent>
               </Select>
             </div>
-            {segmentModel === 'sam3' && (
+            {insid3Integration.sidebarPanel}
+            {segmentModel === 'sam3' && !sam3Available && <Sam3UnavailablePanel />}
+            {segmentModel === 'sam3' && sam3Available && (
               <>
                 <div className="mt-2">
                   <Label className="text-xs text-muted-foreground">Text prompt (optional)</Label>
@@ -6548,7 +7092,13 @@ const ImageAnnotation = () => {
                       imageCollections.find((c) => String(c.id) === mainLayer)?.images.length === 0
                     }
                     onClick={applySam3OnAllImages}
-                    title="Run SAM 3 text segmentation on every image in the current layer and add annotations for the selected class"
+                    title={
+                      !segmentTextPrompt.trim()
+                        ? 'Enter a text prompt above (e.g. dog, car)'
+                        : !selectedClass
+                          ? 'Select a class in the Classes panel'
+                          : 'Run SAM 3 text segmentation on every image in the current layer'
+                    }
                   >
                     {isApplyingAllImages && applyAllProgress ? (
                       <>
@@ -6966,7 +7516,15 @@ const ImageAnnotation = () => {
                 />
                 <canvas
                   ref={canvasRef}
-                  className={`absolute w-full h-full ${activeTool === 'select' ? 'cursor-default' : 'cursor-crosshair'} ${isSamInteractionBlocked && activeTool === 'auto-segment' ? 'pointer-events-none' : ''}`}
+                  className={`absolute w-full h-full ${
+                    insid3SegmentActive
+                      ? insid3HoverAnnotationId
+                        ? 'cursor-pointer'
+                        : 'cursor-crosshair'
+                      : activeTool === 'select'
+                        ? 'cursor-default'
+                        : 'cursor-crosshair'
+                  } ${isSamInteractionBlocked && samSegmentActive ? 'pointer-events-none' : ''}`}
                   onMouseDown={handleCanvasMouseDown}
                   onMouseMove={handleCanvasMouseMove}
                   onMouseUp={handleCanvasMouseUp}
@@ -7042,7 +7600,7 @@ const ImageAnnotation = () => {
             })()}
 
             {/* Active-tool hint pill (top-center) — explains what the current tool does */}
-            {activeTool !== 'select' && currentImage && (
+            {activeTool !== 'select' && currentImage && !(activeTool === 'auto-segment' && segmentModel === 'insid3') && (
               <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 pointer-events-none animate-fade-in">
                 <div className="inline-flex items-center gap-2 rounded-full border border-border bg-card/90 backdrop-blur-sm px-3 py-1 text-xs font-medium shadow-sm">
                   {activeTool === 'polygon' && (
@@ -7057,7 +7615,7 @@ const ImageAnnotation = () => {
                       <span><strong>Pencil</strong> — drag to free-draw outline · release to close</span>
                     </>
                   )}
-                  {activeTool === 'auto-segment' && (
+                  {activeTool === 'auto-segment' && segmentModel !== 'insid3' && (
                     <>
                       <Crosshair className="h-3.5 w-3.5 text-primary" />
                       <span>
@@ -7209,8 +7767,10 @@ const ImageAnnotation = () => {
               </div>
             )}
 
-            {/* Auto-segment preview overlay with accept/cancel controls */}
-            {autoSegmentPreview && (() => {
+            {insid3Integration.canvasBanner}
+
+            {/* Auto-segment preview overlay with apply/cancel controls */}
+            {autoSegmentPreview && autoSegmentPreview.polygons?.length > 0 && (() => {
               // Read from the same refs the canvas uses so the SAM preview
               // (fill "bitmask" + outline) stays aligned with the bitmap and
               // already-accepted annotation polygons during zoom/pan. Using
@@ -7244,10 +7804,12 @@ const ImageAnnotation = () => {
                   ))}
                 </svg>
 
-                {/* Controls - accept/cancel */}
-                <div className="absolute right-6 bottom-6 z-40 pointer-events-auto flex flex-col gap-2 w-64 bg-card/90 backdrop-blur-sm border border-border p-3 rounded-lg">
+                {/* Controls - apply/cancel (above SAM loading overlay) */}
+                <div className="absolute right-6 bottom-6 z-50 pointer-events-auto flex flex-col gap-2 w-64 bg-card/90 backdrop-blur-sm border border-border p-3 rounded-lg shadow-lg">
                   <p className="text-xs text-muted-foreground">
-                    Left-click: add to mask. Right-click: remove from mask. Add more points to refine. Press Enter to accept.
+                    {segmentModel === 'sam3'
+                      ? 'SAM 3 — click Apply to save these regions as annotations, or Cancel to discard.'
+                      : 'Click Apply to save these regions as annotations, or Cancel to discard.'}
                   </p>
                   <div className="flex gap-2">
                     <Select value={autoSegmentClassId || ''} onValueChange={(v) => {
@@ -7264,7 +7826,14 @@ const ImageAnnotation = () => {
                   </div>
 
                   <div className="flex justify-end gap-2 mt-2">
-                    <Button size="sm" onClick={acceptAutoSegment}>Accept</Button>
+                    <Button
+                      size="sm"
+                      onClick={acceptAutoSegment}
+                      disabled={!autoSegmentClassId}
+                      title={autoSegmentClassId ? 'Save preview as annotations' : 'Select a class first'}
+                    >
+                      Apply
+                    </Button>
                     <Button size="sm" variant="outline" onClick={cancelAutoSegment}>Cancel</Button>
                   </div>
                 </div>
@@ -7831,6 +8400,28 @@ const ImageAnnotation = () => {
           </div>
         </div>
       )}
+
+      <Sam3ResultsDialog
+        open={sam3ResultsOpen}
+        onOpenChange={setSam3ResultsOpen}
+        data={sam3ResultsData}
+      />
+
+      <Insid3ResultsDialog
+        open={insid3ResultsOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            insid3PendingBatchRef.current = null;
+          }
+          setInsid3ResultsOpen(open);
+        }}
+        data={insid3ResultsData}
+        classes={classes}
+        applyClassId={insid3ApplyClassId}
+        onApplyClassIdChange={setInsid3ApplyClassId}
+        onApplyBatch={handleInsid3ApplyFromDialog}
+        isApplyingBatch={isInsid3ApplyingBatch}
+      />
 
       {/* Save Annotation File Dialog */}
       <Dialog open={showSaveDialog} onOpenChange={setShowSaveDialog}>

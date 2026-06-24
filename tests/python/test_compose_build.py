@@ -6,8 +6,11 @@ from pathlib import Path
 import pytest
 
 from lai.compose_build import (
+    DEFAULT_TAGS,
     _is_local_build_tag,
     _parse_env_file,
+    developer_build_status,
+    ensure_developer_build_env,
     image_tags,
     should_build_stack,
     uses_local_build,
@@ -79,3 +82,31 @@ def test_parse_env_file_ignores_comments(tmp_path: Path, env_file: Path):
     env_file.write_text("# comment\nLAI_DATA_DIR=/data/lai\n")
     parsed = _parse_env_file(tmp_path)
     assert parsed["LAI_DATA_DIR"] == "/data/lai"
+
+
+def test_ensure_developer_build_env_writes_local_tags(tmp_path: Path, env_file: Path, monkeypatch):
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "backend").mkdir()
+    (tmp_path / "lai").mkdir()
+    (tmp_path / "docker-compose.yml").write_text("name: lai\n")
+    monkeypatch.setattr("lai.registry.is_developer_checkout", lambda _r: True)
+
+    env_file.write_text(_registry_env())
+    changed = ensure_developer_build_env(tmp_path)
+    assert changed is True
+    tags = image_tags(tmp_path)
+    assert tags["LAI_MMYOLO_IMAGE"] == DEFAULT_TAGS["LAI_MMYOLO_IMAGE"]
+    assert uses_local_build(tmp_path) is True
+
+
+def test_ensure_developer_build_env_skips_non_dev(tmp_path: Path, env_file: Path, monkeypatch):
+    monkeypatch.setattr("lai.registry.is_developer_checkout", lambda _r: False)
+    env_file.write_text(_registry_env())
+    assert ensure_developer_build_env(tmp_path) is False
+
+
+def test_developer_build_status(tmp_path: Path, env_file: Path, monkeypatch):
+    monkeypatch.setattr("lai.registry.is_developer_checkout", lambda _r: True)
+    status = developer_build_status(tmp_path)
+    assert status["developer_checkout"] is True
+    assert status["pipeline_cmd"] == "lai dev"

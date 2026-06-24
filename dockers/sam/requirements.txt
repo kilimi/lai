@@ -9,7 +9,14 @@ gunicorn
 requests
 huggingface_hub
 einops
+scikit-learn
+scipy
 decord
 pycocotools
+# INSID3 / DINOv3 (torch.hub) — not all pulled in by SAM stack; see INSID3 requirements.txt
+torchmetrics>=0.11
+termcolor>=1.1.0
+tqdm>=4.60
+matplotlib>=3.7
 # SAM-2 and sam3 are installed from requirements-git.txt with --no-build-isolation
 # (see Dockerfile) to avoid pip build-isolation failing to build SAM-2.

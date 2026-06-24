@@ -1,0 +1,2 @@
+# Shell entrypoints must stay LF or Linux containers fail with "no such file or directory".
+*.sh text eol=lf

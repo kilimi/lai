@@ -6,8 +6,9 @@ from shapely.geometry import shape
 import numpy as np
 
 # --- CONFIG ---
-input_raster = r"C:\Users\Lilita\Nextcloud\MDPI_paper\WR_stressed_clip_color_distance_kmeans.tif"   # path to your raster
-output_dir = r"C:\Users\Lilita\Nextcloud\MDPI_paper\labels_polygons"      # folder to save shapefiles
+# Set INPUT_RASTER and OUTPUT_DIR env vars, or edit the defaults below.
+input_raster = os.environ.get("INPUT_RASTER", "path/to/your/raster.tif")
+output_dir = os.environ.get("OUTPUT_DIR", "path/to/output/labels_polygons")
 
 # Optional: map pixel values to label names (customize as needed)
 # If empty, will use pixel values as label names

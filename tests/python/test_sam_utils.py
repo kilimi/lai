@@ -1,16 +1,9 @@
 """Unit tests for SAM mask → polygon helpers."""
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 import numpy as np
 
-BACKEND_ROOT = Path(__file__).resolve().parents[2] / "backend" / "sam_service"
-if str(BACKEND_ROOT) not in sys.path:
-    sys.path.insert(0, str(BACKEND_ROOT))
-
-from utils import iter_instance_masks, polygons_from_instance_masks  # noqa: E402
+from sam_utils import iter_instance_masks, polygons_from_instance_masks  # noqa: E402
 
 
 def test_iter_instance_masks_splits_batch():

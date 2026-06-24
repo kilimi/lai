@@ -1,4 +1,6 @@
 
+import os
+
 import fiftyone as fo
 import fiftyone.utils.coco as fouc
 import fiftyone.utils.eval as foue
@@ -11,6 +13,11 @@ for dataset_name in fo.list_datasets():
 print("All datasets deleted.\n")
 
 # --- CONFIGURATION ---
+# Override with env vars, e.g. FIFTYONE_EXPORTS_DIR and FIFTYONE_IMAGES_ROOT.
+_EXPORTS_DIR = os.environ.get("FIFTYONE_EXPORTS_DIR", "path/to/exports")
+_PREDICTIONS_DIR = os.environ.get("FIFTYONE_PREDICTIONS_DIR", os.path.join(_EXPORTS_DIR, "predictions"))
+_IMAGES_ROOT = os.environ.get("FIFTYONE_IMAGES_ROOT", "path/to/lai/backend/projects/4")
+
 dataset_name = "WR_Zhytomyr_26072025"
 confidence_thresholds = [0.5]  # Test 4 different confidence levels
 iou_thresholds = [0.1]  # Test different IoU thresholds (lower = more lenient matching)
@@ -18,46 +25,46 @@ display_results_in_fiftyone = True  # Set to False to skip displaying datasets i
 
 # Paths to 4 ground truth files in COCO format with corresponding image directories
 ground_truth_paths = [
-    "C:\\Users\\Lilita\\Downloads\\WR_320_Gly_export.json",
-    "C:\\Users\\Lilita\\Downloads\\WR_320_NoGly_export.json",
-    "C:\\Users\\Lilita\\Downloads\\WR_560_Gly_export.json",
-    "C:\\Users\\Lilita\\Downloads\\WR_560_NoGly_export.json",
+    os.path.join(_EXPORTS_DIR, "WR_320_Gly_export.json"),
+    os.path.join(_EXPORTS_DIR, "WR_320_NoGly_export.json"),
+    os.path.join(_EXPORTS_DIR, "WR_560_Gly_export.json"),
+    os.path.join(_EXPORTS_DIR, "WR_560_NoGly_export.json"),
 ]
 
 image_dirs = [
-    "E:\\projects\\lai\\backend\\projects\\4\\33\\images",
-    "E:\\projects\\lai\\backend\\projects\\4\\34\\images",
-    "E:\\projects\\lai\\backend\\projects\\4\\35\\images",
-    "E:\\projects\\lai\\backend\\projects\\4\\36\\images",                                         
+    os.path.join(_IMAGES_ROOT, "33", "images"),
+    os.path.join(_IMAGES_ROOT, "34", "images"),
+    os.path.join(_IMAGES_ROOT, "35", "images"),
+    os.path.join(_IMAGES_ROOT, "36", "images"),
 ]
 
 # Paths to 4 prediction files in COCO format
 prediction_paths = [
-    "C:\\Users\\Lilita\\Downloads\\evaluation_169_all_coco\\WR_320_Gly_coco.json",
-    "C:\\Users\\Lilita\\Downloads\\evaluation_169_all_coco\\WR_320_NoGly_coco.json",
-    "C:\\Users\\Lilita\\Downloads\\evaluation_169_all_coco\\WR_560_Gly_coco.json",
-    "C:\\Users\\Lilita\\Downloads\\evaluation_169_all_coco\\WR_560_NoGly_coco.json",
+    os.path.join(_PREDICTIONS_DIR, "WR_320_Gly_coco.json"),
+    os.path.join(_PREDICTIONS_DIR, "WR_320_NoGly_coco.json"),
+    os.path.join(_PREDICTIONS_DIR, "WR_560_Gly_coco.json"),
+    os.path.join(_PREDICTIONS_DIR, "WR_560_NoGly_coco.json"),
 ]
 #### OR DATASETS ####
 ground_truth_paths_or = [
-    "C:\\Users\\Lilita\\Downloads\\OR_320_Gly_export.json",
-    "C:\\Users\\Lilita\\Downloads\\OR_320_NoGly_export.json",
-    "C:\\Users\\Lilita\\Downloads\\OR_560_Gly_export.json",
-    "C:\\Users\\Lilita\\Downloads\\OR_560_NoGly_export.json",
+    os.path.join(_EXPORTS_DIR, "OR_320_Gly_export.json"),
+    os.path.join(_EXPORTS_DIR, "OR_320_NoGly_export.json"),
+    os.path.join(_EXPORTS_DIR, "OR_560_Gly_export.json"),
+    os.path.join(_EXPORTS_DIR, "OR_560_NoGly_export.json"),
 ]
 
 image_dirs_or = [
-    "E:\\projects\\lai\\backend\\projects\\4\\37\\images",
-    "E:\\projects\\lai\\backend\\projects\\4\\38\\images",
-    "E:\\projects\\lai\\backend\\projects\\4\\39\\images",
-    "E:\\projects\\lai\\backend\\projects\\4\\40\\images",
+    os.path.join(_IMAGES_ROOT, "37", "images"),
+    os.path.join(_IMAGES_ROOT, "38", "images"),
+    os.path.join(_IMAGES_ROOT, "39", "images"),
+    os.path.join(_IMAGES_ROOT, "40", "images"),
 ]
 
 prediction_paths_or = [
-    "C:\\Users\\Lilita\\Downloads\\OR_Training\\OR_320_Gly_coco.json",
-    "C:\\Users\\Lilita\\Downloads\\OR_Training\\OR_320_NoGly_coco.json",
-    "C:\\Users\\Lilita\\Downloads\\OR_Training\\OR_560_Gly_coco.json",
-    "C:\\Users\\Lilita\\Downloads\\OR_Training\\OR_560_NoGly_coco.json",
+    os.path.join(_PREDICTIONS_DIR, "OR_320_Gly_coco.json"),
+    os.path.join(_PREDICTIONS_DIR, "OR_320_NoGly_coco.json"),
+    os.path.join(_PREDICTIONS_DIR, "OR_560_Gly_coco.json"),
+    os.path.join(_PREDICTIONS_DIR, "OR_560_NoGly_coco.json"),
 ]
 
 #ground_truth_paths = ground_truth_paths_or

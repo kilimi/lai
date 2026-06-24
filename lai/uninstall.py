@@ -207,7 +207,7 @@ def run_uninstall(
     env_file = resolve_env_file(bundle_root)
 
     print("LAI uninstall — stops the stack, removes data + .env, and by default removes compose images.")
-    print("(Does not remove application source code or SAM 3 weights on disk — see SAM3_MODELS_HOST_PATH.)")
+    print("(Does not remove application source code or SAM 3 / DINOv3 weights on disk — see SAM3_MODELS_HOST_PATH / DINOV3_WEIGHTS_HOST_PATH.)")
     print()
     if data_dir is not None:
         ok, reason = _is_safe_to_delete(data_dir, bundle_root)
@@ -291,7 +291,7 @@ def run_uninstall(
             print(f"Warning: could not remove pip bundle: {e}", file=sys.stderr)
 
     print()
-    print("Done. SAM 3 weights (folder from SAM3_MODELS_HOST_PATH in .env) were not removed.")
+    print("Done. SAM 3 and DINOv3 weight folders (from .env) were not removed.")
     if no_rmi or skip_compose_down:
         print("Tip: to remove images later: docker compose down --rmi all  (from the bundle directory)")
     return 0

@@ -93,6 +93,17 @@ DEPTH_ONNX_NAMES: tuple[str, ...] = tuple(
 
 MINIMAL_DEPTH_ONNX: tuple[str, ...] = ("depth_anything_v2_vitb_outdoor_dynamic.onnx",)
 
+# DINOv3 .pth checkpoints for INSID3 (sam_service /models/dinov3)
+DINOV3_META_CDN = "https://dl.fbaipublicfiles.com/dinov3"
+
+DINOV3_MODEL_FILES: dict[str, str] = {
+    "small": "dinov3_vits16_pretrain_lvd1689m-08c60483.pth",
+    "base": "dinov3_vitb16_pretrain_lvd1689m-73cec8be.pth",
+    "large": "dinov3_vitl16_pretrain_lvd1689m-8aa4cbdd.pth",
+}
+
+MINIMAL_DINOV3_SIZES: tuple[str, ...] = ("base",)
+
 
 def resolve_ultralytics_pretrained_spec(spec: str | None) -> list[str]:
     """
@@ -139,6 +150,52 @@ def resolve_ultralytics_pretrained_spec(spec: str | None) -> list[str]:
     resolved = sorted(out)
     if not resolved:
         return sorted(m for m in MINIMAL_ULTRALYTICS_PT if m in full)
+    return resolved
+
+
+def dinov3_pth_filenames() -> list[str]:
+    """All INSID3-compatible DINOv3 checkpoint filenames."""
+    return list(DINOV3_MODEL_FILES.values())
+
+
+def dinov3_meta_cdn_url(filename: str) -> str:
+    """Public Meta CDN URL for a DINOv3 .pth file (requires license acceptance)."""
+    model_dir = filename.split("_pretrain_")[0]
+    return f"{DINOV3_META_CDN}/{model_dir}/{filename}"
+
+
+def resolve_dinov3_models_spec(spec: str | None) -> list[str]:
+    """Resolve LAI_DINOV3_MODELS: none | all | minimal | size tokens | comma filenames."""
+    full = dinov3_pth_filenames()
+    by_size = DINOV3_MODEL_FILES
+    s = (spec or "").strip()
+    sl = s.lower()
+    if sl in ("none", "on_demand", "runtime", "download_on_request"):
+        return []
+    if not s or sl == "all":
+        return full
+    if sl == "minimal":
+        return [by_size[k] for k in MINIMAL_DINOV3_SIZES if k in by_size]
+
+    tokens = [t.strip() for t in s.split(",") if t.strip()]
+    out: set[str] = set()
+    for t in tokens:
+        tl = t.lower()
+        if tl == "all":
+            return full
+        if tl == "minimal":
+            out.update(by_size[k] for k in MINIMAL_DINOV3_SIZES if k in by_size)
+            continue
+        if tl in by_size:
+            out.add(by_size[tl])
+            continue
+        if tl.endswith(".pth") and tl in full:
+            out.add(tl)
+            continue
+
+    resolved = sorted(out)
+    if not resolved:
+        return [by_size[k] for k in MINIMAL_DINOV3_SIZES if k in by_size]
     return resolved
 
 

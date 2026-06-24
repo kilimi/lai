@@ -32,8 +32,9 @@ RUN wget -q https://repo.anaconda.com/miniconda/Miniconda3-py39_24.1.2-0-Linux-x
 
 ARG MMCV_VERSION=2.0.1
 ARG MMCV_BUILD_JOBS=2
-# Prebuilt OpenMMLab wheels only ship sm_60–sm_86 kernels; RTX 40xx+ need a source build (+PTX).
-ARG MMCV_USE_PREBUILT=0
+# Prebuilt OpenMMLab wheels (default): fast install, GPUs sm_60–sm_86 (most RTX 20/30).
+# RTX 40xx (sm_89+): set MMCV_USE_PREBUILT=0 and allow 30–60+ min source build, or add a custom wheel under wheels/.
+ARG MMCV_USE_PREBUILT=1
 ARG MMCV_WHEEL_INDEX=https://download.openmmlab.com/mmcv/dist/cu113/torch1.10.0/index.html
 # Optional offline wheels in dockers/backend/wheels/ (.gitkeep keeps COPY valid when empty).
 COPY wheels/ /wheels/
@@ -57,8 +58,9 @@ RUN if ls /wheels/mmengine-*.whl >/dev/null 2>&1; then \
 RUN if ls /wheels/mmcv-*.whl >/dev/null 2>&1; then \
         echo "Installing mmcv from wheels/ (offline)"; \
         PYTHONPATH= ${MMYOLO_ENV}/bin/pip install --no-cache-dir /wheels/mmcv-*.whl; \
-    elif [ "${MMCV_USE_PREBUILT}" = "1" ] && wget -q --spider "${MMCV_WHEEL_INDEX}" 2>/dev/null; then \
-        echo "Installing mmcv v${MMCV_VERSION} from OpenMMLab prebuilt wheel (sm_60–sm_86 only)"; \
+    elif [ "${MMCV_USE_PREBUILT}" = "1" ]; then \
+        echo "Installing mmcv v${MMCV_VERSION} from OpenMMLab prebuilt wheel (sm_60–sm_86)"; \
+        echo "  index: ${MMCV_WHEEL_INDEX}"; \
         PYTHONPATH= ${MMYOLO_ENV}/bin/pip install --no-cache-dir "mmcv==${MMCV_VERSION}" \
             -f "${MMCV_WHEEL_INDEX}"; \
     else \
@@ -82,7 +84,9 @@ RUN PYTHONPATH= ${MMYOLO_ENV}/bin/pip install --no-cache-dir "mmrotate==1.0.0rc1
 
 RUN ${MMYOLO_PYTHON} -c "import mmengine, mmcv, mmdet, mmyolo, mmrotate; print('mmyolo stack ok', mmcv.__version__, mmrotate.__version__)"
 
+# Verify PyTorch loads with GLIBC_TUNABLES (worker subprocess uses this). Do not call
+# init_detector here — mmcv CPU ops can SIGILL (exit 132) on some Docker build VMs (e.g. Windows).
 RUN env -u PYTHONPATH GLIBC_TUNABLES=glibc.rtld.execstack=2 \
-    ${MMYOLO_PYTHON} -c "import torch; from mmdet.apis import init_detector; print('mmyolo torch ok', torch.__version__)"
+    ${MMYOLO_PYTHON} -c "import torch; print('mmyolo torch ok', torch.__version__)"
 
 CMD ["sleep", "infinity"]

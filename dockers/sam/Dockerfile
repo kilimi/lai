@@ -25,14 +25,20 @@ RUN pip install --no-cache-dir --upgrade pip 'setuptools>=69,<82' wheel packagin
 RUN mkdir -p /models/hf_cache /models/sam3 \
     && python -c "from huggingface_hub import hf_hub_download; hf_hub_download(repo_id='facebook/sam2.1-hiera-small', filename='sam2.1_hiera_small.pt'); print('SAM 2 checkpoint downloaded.')"
 
-COPY app.py utils.py ./
+RUN git clone --depth 1 https://github.com/visinf/INSID3.git /opt/insid3
+
+COPY app.py sam_utils.py insid3_runner.py insid3_mask_utils.py dinov3_weight_utils.py ./
 
 ENV FLASK_APP=app.py
 ENV FLASK_RUN_HOST=0.0.0.0
 ENV SAM2_MODEL_ID=facebook/sam2.1-hiera-small
+ENV INSID3_CODE_PATH=/opt/insid3
+ENV INSID3_ENABLED=1
+ENV DINOV3_WEIGHTS_DIR=/models/dinov3
+ENV PYTHONPATH=/opt/insid3
 # Optional: set to /models/sam3/sam3.pt when mounting a volume with local checkpoint
 ENV SAM3_CHECKPOINT_PATH=/models/sam3/sam3.pt
 
 EXPOSE 8081
 
-CMD ["gunicorn", "-b", "0.0.0.0:8081", "app:app", "--workers", "1", "--timeout", "120"]
+CMD ["gunicorn", "-b", "0.0.0.0:8081", "app:app", "--workers", "1", "--timeout", "300", "--access-logfile", "-", "--error-logfile", "-", "--capture-output", "--log-level", "info"]

@@ -76,6 +76,7 @@ Opens a **browser wizard** on `http://127.0.0.1:…` where you choose:
 | Web port | `8089` | UI in your browser |
 | GPU tier | off | Enables `worker-gpu` + `sam_service` (NVIDIA required) |
 | SAM 3 folder | `~/lai-data/sam3-models` | Optional checkpoint path (SAM 2 works without it) |
+| DINOv3 folder | `~/lai-data/dinov3-models` | INSID3 weights (ViT-B from [Meta CDN](https://dl.fbaipublicfiles.com/dinov3/dinov3_vitb16/dinov3_vitb16_pretrain_lvd1689m-73cec8be.pth) or `python backend/scripts/download_dinov3_models.py`) |
 
 Terminal alternative: `lai install` or `lai install --yes` for non-interactive defaults.
 
@@ -129,6 +130,8 @@ Use `lai download-models --help` for the full matrix. Re-run anytime to add more
 lai restart sam_service
 ```
 
+**INSID3 (DINOv3)** — *From example* segmentation uses DINOv3 **ViT-B** weights in the folder from install (`DINOV3_WEIGHTS_HOST_PATH`). Default file: `dinov3_vitb16_pretrain_lvd1689m-73cec8be.pth` (~330 MB). Download via `python backend/scripts/download_dinov3_models.py` or [Meta CDN](https://dl.fbaipublicfiles.com/dinov3/dinov3_vitb16/dinov3_vitb16_pretrain_lvd1689m-73cec8be.pth). Do not use a ViT-S (`vits16`, 384-dim) file renamed as `vitb16`. Then restart `sam_service`.
+
 **GPU check** (if GPU tier is enabled):
 
 ```bash
@@ -143,7 +146,49 @@ docker compose exec worker-gpu nvidia-smi
 |------|----------|
 | `~/.config/lai/.env` | Ports, data dir, Docker image tags |
 | `~/lai-data/` *(default)* | Postgres/Redis/Mongo data, projects, models |
+| `~/lai-data/backups/` | Manual backup snapshots (see below) |
 | PyPI package `lai/bundle/` | Read-only compose files (do not edit) |
+
+---
+
+## Backup & restore
+
+LAI can back up **PostgreSQL** and **project files** (`/app/projects`) to local disk when you click **Run Backup** in Settings. This is separate from the JSON/ZIP export in Settings → Database Manager.
+
+### Location
+
+| Host | Container |
+|------|-----------|
+| `$LAI_DATA_DIR/backups/` (default `~/lai-data/backups/`) | `/app/backups` |
+
+To store backups elsewhere, add `BACKUP_PATH=/your/path` to `~/.config/lai/.env`, then run `lai down` and `lai up`. The path is mounted into backend and worker containers.
+
+### Create a backup
+
+1. Open **Settings → Backups**.
+2. **Subdirectory** is optional — leave empty to use the root of the backup directory (e.g. `~/lai-data/backups/`).
+3. Set retention (days), then **Save Settings**.
+4. Click **Run Backup**, or enable **Automatic backups** with a frequency (hours).
+
+Each snapshot is a folder like `backup_YYYYMMDD_HHMMSS/` containing `database/*.dump` and project files.
+
+Backups run on `worker-general` (not the API). Automatic runs are triggered by Celery Beat every 15 minutes when the schedule is due.
+
+### Restore from a snapshot
+
+1. Stop training and other long-running jobs.
+2. In **Settings → Backups**, find a **completed** snapshot and click **Restore**.
+3. Choose database and/or project files, confirm, and type `RESTORE`.
+4. When finished, verify projects and data in the UI.
+5. Previous project files are renamed to `projects.pre_restore_*` under your data directory — delete that folder once you are satisfied.
+
+Restore the **most recent** completed snapshot when possible. Older incremental snapshots may be incomplete if newer backups were deleted.
+
+### Disaster recovery
+
+Copy the entire `$LAI_DATA_DIR` directory off-host regularly (external drive, NAS, etc.). Off-site sync (S3, restic) is not built into LAI yet.
+
+**Not included in snapshot backup v1:** FiftyOne/MongoDB metadata, Redis, training runs (`/app/runs`), or legacy `/app/data` paths. Use database export or separate `mongodump` if you need those.
 
 ---
 

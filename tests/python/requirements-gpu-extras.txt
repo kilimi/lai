@@ -3,9 +3,9 @@
 #
 #   pip install -r tests/python/requirements-gpu-extras.txt
 #
-# Not required for training_smoke (uses worker-gpu container).
+# Not required for:
+#   - training_smoke (uses worker-gpu container when LAI_RUN_TRAINING_SMOKE=1)
+#   - insid3_smoke (uses sam_service container; DINOv3 + INSID3 live there)
 
 torch>=2.0.0
 ultralytics>=8.0.0
-
-

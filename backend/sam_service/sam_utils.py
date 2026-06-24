@@ -88,4 +88,3 @@ def combine_instance_masks(masks, orig_w: int, orig_h: int) -> np.ndarray:
             mask = np.array(mask_pil)
         combined = np.maximum(combined, mask)
     return combined
-

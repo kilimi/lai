@@ -50,6 +50,23 @@ services:
         condition: service_healthy
       mongodb:
         condition: service_started
+    # CMD must be set here when overriding entrypoint — otherwise Compose drops image CMD and the
+    # container exits after migrations (restart loop). ENTRYPOINT lives in dockers/backend/Dockerfile.
+    entrypoint: ["/bin/sh", "/app/scripts/docker-entrypoint.sh"]
+    command:
+      [
+        "python",
+        "-m",
+        "uvicorn",
+        "app.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+        "--log-level",
+        "debug",
+        "--reload",
+      ]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health-check"]
       interval: 10s
@@ -79,6 +96,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.mmyolo.runtime
+      args:
+        MMCV_USE_PREBUILT: ${MMCV_USE_PREBUILT:-1}
+        MMCV_BUILD_JOBS: ${MMCV_BUILD_JOBS:-2}
     profiles: [build]
 
   # CPU worker: dataset duplicate, augmentation, annotations, depth ONNX, Celery Beat schedules
@@ -98,6 +118,8 @@ services:
     environment: &worker_env
       - DATABASE_URL=postgresql://postgres:postgres@db/lai_db
       - REDIS_URL=redis://redis:6379/0
+      - API_INTERNAL_BASE_URL=http://backend:8000
+      - LAI_HOST_API_PORT=9999
       - LAI_STALE_TASK_TIMEOUT_HOURS=${LAI_STALE_TASK_TIMEOUT_HOURS:-12}
     depends_on:
       db:
@@ -273,8 +295,14 @@ services:
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
       # Match worker-gpu: explicit index avoids PyTorch seeing no device / CUDA init quirks
       - CUDA_VISIBLE_DEVICES=0
+      - INSID3_CODE_PATH=/opt/insid3
+      - INSID3_ENABLED=${INSID3_ENABLED:-1}
+      - DINOV3_WEIGHTS_DIR=/models/dinov3
     volumes:
       - ${SAM3_MODELS_HOST_PATH:-../../backend/sam_service/models}:/models/sam3:ro
+      - ${DINOV3_WEIGHTS_HOST_PATH:-../../backend/sam_service/models/dinov3}:/models/dinov3:ro
+      # Host pytest for INSID3 smoke (exec from outside the container)
+      - ../../tests:/tests:ro
     ports:
       - "8081:8081"
     restart: unless-stopped

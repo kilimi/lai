@@ -169,6 +169,15 @@ PAGE_FORM = Template("""<!DOCTYPE html>
       <p class="hint">$sam3_hint</p>
     </div>
 
+    <div id="gpu_only_dinov3" class="section-card" style="margin-top:1.25rem">
+      <h2>DINOv3 weights (INSID3)</h2>
+      <p class="hint" style="margin-top:0.25rem">Folder mounted into <code>sam_service</code> for <em>From example (INSID3)</em> segmentation. Download DINOv3 weights from Hugging Face (license approval required) if the folder is empty.</p>
+      <label for="dinov3dir">Weights folder (absolute path)</label>
+      <input type="text" id="dinov3dir" name="dinov3_weights" value="$dinov3_weights"
+        placeholder="/path_to_dinov3_weights" autocomplete="off"/>
+      <p class="hint">$dinov3_hint</p>
+    </div>
+
     <button type="submit" $submit_disabled>Save and finish</button>
   </form>
   <script>
@@ -198,8 +207,12 @@ PAGE_FORM = Template("""<!DOCTYPE html>
       var gpu = document.getElementById("gpu_tier").checked;
       var samWrap = document.getElementById("gpu_only_sam3");
       var samInput = document.getElementById("sam3cp");
+      var dinov3Wrap = document.getElementById("gpu_only_dinov3");
+      var dinov3Input = document.getElementById("dinov3dir");
       samWrap.style.display = gpu ? "block" : "none";
       samInput.required = gpu;
+      dinov3Wrap.style.display = gpu ? "block" : "none";
+      dinov3Input.required = gpu;
       document.getElementById("gpu_on_note").style.display = gpu ? "block" : "none";
       document.getElementById("gpu_off_note").classList.toggle("visible", !gpu);
       document.querySelectorAll(".gpu-only-hint").forEach(function (el) {
@@ -240,7 +253,10 @@ PAGE_OK = Template("""<!DOCTYPE html>
 """)
 
 
+DINOV3_HF_MODEL_URL = "https://huggingface.co/facebook/dinov3-vitb16-pretrain-lvd1689m"
+SAM3_HF_MODEL_URL = "https://huggingface.co/facebook/sam3"
 SAM3_CHECKPOINT_PLACEHOLDER = "/path_to_sam3_checkpoint"
+DINOV3_WEIGHTS_PLACEHOLDER = "/path_to_dinov3_weights"
 
 
 def _default_sam3_checkpoint(bundle_root: Path, *, dev_checkout: bool) -> str:
@@ -250,15 +266,19 @@ def _default_sam3_checkpoint(bundle_root: Path, *, dev_checkout: bool) -> str:
 
 
 def _sam3_hint(*, dev_checkout: bool) -> str:
+    hf = (
+        f'<a href="{SAM3_HF_MODEL_URL}" target="_blank" rel="noopener noreferrer">'
+        "Hugging Face</a>"
+    )
     if dev_checkout:
         return (
-            "Absolute path to your <code>sam3.pt</code> file. Default is under "
+            f"Absolute path to your <code>sam3.pt</code> file. Download from {hf} "
+            "(license approval required). Default is under "
             "<code>backend/sam_service/models/</code> in this repo. SAM 2 works without SAM 3."
         )
     return (
-        "Download SAM 3 weights (e.g. from "
-        '<a href="https://huggingface.co/facebook/sam3" target="_blank" rel="noopener noreferrer">'
-        "Hugging Face</a>) and set the full path to the <code>.pt</code> file. "
+        f"Download SAM 3 weights from {hf} (license approval required) and set the full path "
+        "to the <code>.pt</code> file. "
         "Default <code>~/lai-data/sam3-models/sam3.pt</code> — parent folder is created on save. "
         "SAM 2 works without SAM 3."
     )
@@ -272,6 +292,40 @@ def _parse_sam3_checkpoint(path_str: str) -> tuple[str, str]:
         return str(resolved.parent), resolved.name
     resolved = p.resolve()
     return str(resolved), "sam3.pt"
+
+
+def _default_dinov3_weights_dir(bundle_root: Path, *, dev_checkout: bool) -> str:
+    if dev_checkout:
+        return str((bundle_root / "backend" / "sam_service" / "models" / "dinov3").resolve())
+    return str((Path.home() / "lai-data" / "dinov3-models").resolve())
+
+
+def _dinov3_hint(*, dev_checkout: bool) -> str:
+    hf = (
+        f'<a href="{DINOV3_HF_MODEL_URL}" '
+        'target="_blank" rel="noopener noreferrer">Hugging Face</a>'
+    )
+    if dev_checkout:
+        return (
+            f"Absolute path to a folder containing DINOv3 <code>.pth</code> files "
+            f"(default <code>backend/sam_service/models/dinov3/</code>). "
+            f"Request access and download from {hf} (license approval required), "
+            "then copy weights here."
+        )
+    return (
+        "Folder for DINOv3 checkpoints used by INSID3. Default "
+        "<code>~/lai-data/dinov3-models</code> — created on save. "
+        f"Request access and download from {hf} (license approval required), "
+        "then place <code>.pth</code> files here."
+    )
+
+
+def _parse_dinov3_weights_path(path_str: str) -> str:
+    """Resolve host folder for DINOV3_WEIGHTS_HOST_PATH (file → parent directory)."""
+    p = Path(path_str).expanduser()
+    if p.suffix.lower() == ".pth":
+        return str(p.resolve().parent)
+    return str(p.resolve())
 
 
 def _upsert_env_line(env_path: Path, key: str, value: str) -> None:
@@ -292,6 +346,7 @@ def _apply_setup(
     vite_api_url: str,
     sam3_host_dir: str,
     sam3_checkpoint_file: str,
+    dinov3_host_dir: str,
     *,
     lai_pretrained_models: str = "all",
     lai_depth_models: str = "all",
@@ -299,6 +354,8 @@ def _apply_setup(
     lai_repo_root: str | None = None,
     gpu_tier: bool = True,
 ) -> None:
+    from lai.registry import is_developer_checkout, write_registry_env
+
     data_path = Path(data_dir).expanduser().resolve()
     data_path.mkdir(parents=True, exist_ok=True)
     for sub in ("postgres", "redis", "mongodb", "projects", "data", "backups", "runs"):
@@ -306,6 +363,8 @@ def _apply_setup(
 
     sam3_path = Path(sam3_host_dir).expanduser().resolve()
     sam3_path.mkdir(parents=True, exist_ok=True)
+    dinov3_path = Path(dinov3_host_dir).expanduser().resolve()
+    dinov3_path.mkdir(parents=True, exist_ok=True)
 
     env_file = resolve_env_file(bundle_root)
     env_file.parent.mkdir(parents=True, exist_ok=True)
@@ -314,6 +373,14 @@ def _apply_setup(
     _upsert_env_line(env_file, "VITE_API_URL", vite_api_url.strip())
     _upsert_env_line(env_file, "SAM3_MODELS_HOST_PATH", str(sam3_path))
     _upsert_env_line(env_file, "SAM3_CHECKPOINT_FILENAME", sam3_checkpoint_file.strip())
+    _upsert_env_line(env_file, "DINOV3_WEIGHTS_HOST_PATH", str(dinov3_path))
+    if is_developer_checkout(bundle_root) and bind_host_backend:
+        from lai.compose_build import DEFAULT_TAGS, IMAGE_ENV_KEYS
+
+        for key in IMAGE_ENV_KEYS:
+            _upsert_env_line(env_file, key, DEFAULT_TAGS[key])
+        _upsert_env_line(env_file, "MMCV_USE_PREBUILT", "1")
+        _upsert_env_line(env_file, "MMCV_BUILD_JOBS", "2")
     _upsert_env_line(env_file, "LAI_PRETRAINED_MODELS", lai_pretrained_models.strip())
     _upsert_env_line(env_file, "LAI_DEPTH_MODELS", lai_depth_models.strip())
     root = (Path(lai_repo_root).expanduser().resolve() if lai_repo_root else bundle_root.resolve())
@@ -323,7 +390,6 @@ def _apply_setup(
         "COMPOSE_FILE",
         compose_file_env_value(bind_code=bind_host_backend),
     )
-    from lai.registry import is_developer_checkout, write_registry_env
 
     if is_developer_checkout(bundle_root):
         _upsert_env_line(env_file, "LAI_GPU_TIER", "1" if gpu_tier else "0")
@@ -423,6 +489,8 @@ def run_wizard(bundle_root: Path, *, open_browser: bool = True) -> int:
     dev_checkout = is_developer_checkout(bundle_root)
     default_sam3_checkpoint = _default_sam3_checkpoint(bundle_root, dev_checkout=dev_checkout)
     sam3_hint = _sam3_hint(dev_checkout=dev_checkout)
+    default_dinov3_weights = _default_dinov3_weights_dir(bundle_root, dev_checkout=dev_checkout)
+    dinov3_hint = _dinov3_hint(dev_checkout=dev_checkout)
     bind_yes_checked = "checked" if dev_checkout else ""
     bind_no_checked = "" if dev_checkout else "checked"
     gpu_tier_checked = "checked"
@@ -447,6 +515,8 @@ def run_wizard(bundle_root: Path, *, open_browser: bool = True) -> int:
                     depth_custom="",
                     sam3_checkpoint=_html_escape(default_sam3_checkpoint),
                     sam3_hint=sam3_hint,
+                    dinov3_weights=_html_escape(default_dinov3_weights),
+                    dinov3_hint=dinov3_hint,
                     submit_disabled=submit_dis,
                     bind_yes_checked=bind_yes_checked,
                     bind_no_checked=bind_no_checked,
@@ -480,6 +550,7 @@ def run_wizard(bundle_root: Path, *, open_browser: bool = True) -> int:
                 data_dir = (data.get("data_dir") or [""])[0].strip()
                 web_port = (data.get("web_port") or [""])[0].strip()
                 sam3_checkpoint = (data.get("sam3_checkpoint") or [""])[0].strip()
+                dinov3_weights = (data.get("dinov3_weights") or [""])[0].strip()
                 lai_pt = _resolve_pretrained_from_form(data)
                 lai_depth = _resolve_env_preset(
                     (data.get("depth_preset") or ["all"])[0],
@@ -506,6 +577,19 @@ def run_wizard(bundle_root: Path, *, open_browser: bool = True) -> int:
                         b"(not the placeholder /path_to_sam3_checkpoint)."
                     )
                     return
+                if gpu_tier and not dinov3_weights:
+                    self.send_response(400)
+                    self.end_headers()
+                    self.wfile.write(b"DINOv3 weights folder is required when GPU tier is enabled.")
+                    return
+                if gpu_tier and dinov3_weights == DINOV3_WEIGHTS_PLACEHOLDER:
+                    self.send_response(400)
+                    self.end_headers()
+                    self.wfile.write(
+                        b"Set the full absolute path to your DINOv3 weights folder "
+                        b"(not the placeholder /path_to_dinov3_weights)."
+                    )
+                    return
                 p = Path(data_dir).expanduser()
                 if not p.is_absolute():
                     self.send_response(400)
@@ -520,8 +604,16 @@ def run_wizard(bundle_root: Path, *, open_browser: bool = True) -> int:
                         self.wfile.write(b"SAM 3 checkpoint must be an absolute path.")
                         return
                     sam3_dir, sam3_file = _parse_sam3_checkpoint(sam3_checkpoint)
+                    d3 = Path(dinov3_weights).expanduser()
+                    if not d3.is_absolute():
+                        self.send_response(400)
+                        self.end_headers()
+                        self.wfile.write(b"DINOv3 weights path must be an absolute path.")
+                        return
+                    dinov3_dir = _parse_dinov3_weights_path(dinov3_weights)
                 else:
                     sam3_dir, sam3_file = _parse_sam3_checkpoint(default_sam3_checkpoint)
+                    dinov3_dir = _parse_dinov3_weights_path(default_dinov3_weights)
                 try:
                     pi = int(web_port)
                     if not (1 <= pi <= 65535):
@@ -558,6 +650,7 @@ def run_wizard(bundle_root: Path, *, open_browser: bool = True) -> int:
                         "http://localhost:9999",
                         sam3_dir,
                         sam3_file,
+                        dinov3_dir,
                         lai_pretrained_models=lai_pt,
                         lai_depth_models=lai_depth,
                         bind_host_backend=bind_host_backend,

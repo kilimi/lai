@@ -2,31 +2,34 @@
 COMPOSE ?= docker compose
 ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 
-# Run from repository root. Requires Docker Compose v2.24+ (for `include` in docker-compose.yml).
-COMPOSE ?= docker compose
-ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
-
-# Foundation model selection for `make download-models`.
-# Values: all | minimal | none | comma list (e.g. yolo11,yolo11n-seg.pt)
+# Foundation model selection for `make download-models` (YOLO + depth only).
 LAI_PRETRAINED_MODELS ?= minimal
 LAI_DEPTH_MODELS ?= minimal
 
-.PHONY: install check-sam3 up down logs ps build pull up-no-build download-models help
+# Prefer lai CLI when available (pip install -e .)
+LAI_CMD := $(shell command -v lai 2>/dev/null)
+ifeq ($(LAI_CMD),)
+  ifneq ($(wildcard $(ROOT)/.venv/bin/lai),)
+    LAI_CMD := $(ROOT)/.venv/bin/lai
+  else ifneq ($(wildcard $(ROOT)/.venv/Scripts/lai.exe),)
+    LAI_CMD := $(ROOT)/.venv/Scripts/lai.exe
+  else
+    LAI_CMD := python -m lai
+  endif
+endif
+
+.PHONY: install check-sam3 dev build up up-build down logs ps pull up-no-build download-models help
 
 help:
-	@echo "Targets: install | check-sam3 | up | down | logs | ps | build | pull | up-no-build | download-models"
-	@echo "  install         guided setup: Docker/Compose, data dir, web port, SAM 3, optional host code bind"
-	@echo "  check-sam3      exit 1 if SAM 3 weights missing (for scripts/CI)"
-	@echo "  up              docker compose up -d (build if needed)"
-	@echo "  down            stop stack"
-	@echo "  pull            pull images (set LAI_*_IMAGE in .env first)"
-	@echo "  up-no-build     start without building (after pull)"
-	@echo "  build           build all images"
-	@echo "  logs            follow logs"
-	@echo "  ps              service status"
-	@echo "  download-models fetch foundation YOLO + Depth-Anything weights into the host volume"
-	@echo "                  (preferred CLI: 'lai download-models [--yolo SPEC] [--depth SPEC]')"
-	@echo "                  override which weights with LAI_PRETRAINED_MODELS / LAI_DEPTH_MODELS"
+	@echo "Developer targets (ordered local builds — never plain 'docker compose build' alone):"
+	@echo "  dev             lai dev — :local tags + ML runtimes first + up -d"
+	@echo "  build           lai build — ordered image build only"
+	@echo "  up              lai up — start (builds missing images in order)"
+	@echo "  up-build        lai up --build — full local rebuild + start"
+	@echo ""
+	@echo "Other: install | check-sam3 | down | logs | ps | pull | up-no-build | download-models"
+	@echo "  install         guided setup (writes .env with lai-*:local for git checkouts)"
+	@echo "  download-models fetch YOLO + Depth + MMYOLO weights (lai download-models)"
 
 install:
 	bash "$(ROOT)/scripts/install.sh"
@@ -34,8 +37,17 @@ install:
 check-sam3:
 	@bash "$(ROOT)/scripts/check_sam3.sh"
 
+dev:
+	cd "$(ROOT)" && $(LAI_CMD) dev
+
+build:
+	cd "$(ROOT)" && $(LAI_CMD) build
+
 up:
-	cd "$(ROOT)" && $(COMPOSE) up -d
+	cd "$(ROOT)" && $(LAI_CMD) up
+
+up-build:
+	cd "$(ROOT)" && $(LAI_CMD) up --build
 
 down:
 	cd "$(ROOT)" && $(COMPOSE) down
@@ -46,20 +58,11 @@ logs:
 ps:
 	cd "$(ROOT)" && $(COMPOSE) ps
 
-build:
-	cd "$(ROOT)" && $(COMPOSE) build
-
 pull:
-	cd "$(ROOT)" && $(COMPOSE) pull
+	cd "$(ROOT)" && $(LAI_CMD) pull
 
 up-no-build:
 	cd "$(ROOT)" && $(COMPOSE) up -d --no-build
 
 download-models:
-	cd "$(ROOT)" && $(COMPOSE) exec \
-		-e LAI_PRETRAINED_MODELS=$(LAI_PRETRAINED_MODELS) \
-		worker-gpu python scripts/download_ultralytics_models.py
-	cd "$(ROOT)" && $(COMPOSE) exec \
-		-e LAI_PRETRAINED_MODELS=$(LAI_PRETRAINED_MODELS) \
-		-e LAI_DEPTH_MODELS=$(LAI_DEPTH_MODELS) \
-		backend python scripts/download_depth_anything_models.py
+	cd "$(ROOT)" && $(LAI_CMD) download-models

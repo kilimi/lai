@@ -14,6 +14,9 @@ services:
     volumes:
       - ${LAI_REPO_ROOT}/backend:/app
       - ${LAI_REPO_ROOT}/tests:/tests:ro
+  sam_service:
+    volumes:
+      - ${LAI_REPO_ROOT}/tests:/tests:ro
   celery-beat:
     volumes:
       - ${LAI_REPO_ROOT}/backend:/app

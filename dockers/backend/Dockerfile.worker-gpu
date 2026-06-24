@@ -96,10 +96,10 @@ print('celery worker deps ok', TypeIs)"
 RUN chmod +x /app/scripts/celery_worker_gpu.sh
 
 # MMYOLO train runs in MMYOLO_PYTHON subprocess (Python 3.8 + PyTorch 1.10), not on worker PYTHONPATH.
+# Import-only smoke — init_detector can SIGILL during image build on some Docker hosts.
 RUN env -u PYTHONPATH GLIBC_TUNABLES=glibc.rtld.execstack=2 \
     "${MMYOLO_PYTHON}" -c "\
-import mmyolo; import torch; from mmdet.apis import init_detector; \
-print('mmyolo subprocess stack ok', torch.__version__)"
+import mmyolo, torch; print('mmyolo subprocess stack ok', torch.__version__)"
 
 RUN mkdir -p /app/projects /app/data /app/models /app/ai_models /app/runs
 

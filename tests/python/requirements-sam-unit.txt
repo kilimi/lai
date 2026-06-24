@@ -1,0 +1,6 @@
+# Host-only deps for sam_service unit tests (test_insid3_*, test_sam_utils).
+# Overlaps with requirements-backend.txt; listed explicitly so mask/polygon tests
+# work even when you trim the backend install.
+numpy>=1.21.0,<2
+pillow>=9.0.0
+opencv-python-headless>=4.8.0

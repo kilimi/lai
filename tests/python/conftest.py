@@ -6,9 +6,14 @@ import pytest
 from path_utils import resolve_backend_dir
 
 BACKEND_DIR = resolve_backend_dir()
+SAM_SERVICE_DIR = BACKEND_DIR / "sam_service"
 
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
+
+# sam_service modules (insid3_mask_utils, sam_utils) — append so backend/app package is not shadowed by sam_service/app.py
+if SAM_SERVICE_DIR.is_dir() and str(SAM_SERVICE_DIR) not in sys.path:
+    sys.path.append(str(SAM_SERVICE_DIR))
 
 
 def integration_tests_enabled() -> bool:

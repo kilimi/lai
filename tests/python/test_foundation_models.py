@@ -5,12 +5,17 @@ from app.foundation_models import (
     AUTO_ANNOTATE_YOLO_BASE,
     ARCH_SIZES,
     DEPTH_ONNX_NAMES,
+    DINOV3_MODEL_FILES,
+    MINIMAL_DINOV3_SIZES,
     MINIMAL_DEPTH_ONNX,
     MINIMAL_ULTRALYTICS_PT,
     auto_annotate_yolo_catalog,
     auto_annotate_yolo_onnx_name,
+    dinov3_meta_cdn_url,
+    dinov3_pth_filenames,
     pretrained_yolo_catalog,
     resolve_depth_models_spec,
+    resolve_dinov3_models_spec,
     resolve_ultralytics_pretrained_spec,
     ultralytics_foundation_pt_names,
     validate_auto_annotate_yolo_model,
@@ -102,3 +107,25 @@ def test_depth_spec_all_and_minimal():
 def test_depth_spec_exact_files():
     one = "depth_anything_v2_vitb_outdoor_dynamic.onnx"
     assert resolve_depth_models_spec(one) == [one]
+
+
+def test_dinov3_spec_all_and_minimal():
+    full = dinov3_pth_filenames()
+    assert resolve_dinov3_models_spec("all") == full
+    minimal = [DINOV3_MODEL_FILES[k] for k in MINIMAL_DINOV3_SIZES]
+    assert resolve_dinov3_models_spec("minimal") == minimal
+
+
+def test_dinov3_spec_size_tokens():
+    assert resolve_dinov3_models_spec("base,large") == sorted(
+        [DINOV3_MODEL_FILES["base"], DINOV3_MODEL_FILES["large"]]
+    )
+
+
+def test_dinov3_spec_none():
+    assert resolve_dinov3_models_spec("none") == []
+
+
+def test_dinov3_meta_cdn_url():
+    fname = DINOV3_MODEL_FILES["base"]
+    assert dinov3_meta_cdn_url(fname).endswith(f"/dinov3_vitb16/{fname}")

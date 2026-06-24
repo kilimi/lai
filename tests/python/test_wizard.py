@@ -4,8 +4,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from lai.wizard import (
+    DINOV3_WEIGHTS_PLACEHOLDER,
     SAM3_CHECKPOINT_PLACEHOLDER,
+    _default_dinov3_weights_dir,
     _default_sam3_checkpoint,
+    _parse_dinov3_weights_path,
     _parse_sam3_checkpoint,
     _resolve_pretrained_from_form,
 )
@@ -39,6 +42,34 @@ def test_default_sam3_checkpoint_dev_uses_repo_models(tmp_path: Path):
 
 def test_sam3_placeholder_constant():
     assert SAM3_CHECKPOINT_PLACEHOLDER == "/path_to_sam3_checkpoint"
+
+
+def test_dinov3_placeholder_constant():
+    assert DINOV3_WEIGHTS_PLACEHOLDER == "/path_to_dinov3_weights"
+
+
+def test_parse_dinov3_weights_path_directory(tmp_path: Path):
+    d = tmp_path / "dinov3"
+    d.mkdir()
+    assert _parse_dinov3_weights_path(str(d)) == str(d.resolve())
+
+
+def test_parse_dinov3_weights_path_file_uses_parent(tmp_path: Path):
+    ckpt = tmp_path / "weights" / "dinov3_vitb16_pretrain_lvd1689m-73cec8be.pth"
+    ckpt.parent.mkdir(parents=True)
+    assert _parse_dinov3_weights_path(str(ckpt)) == str(ckpt.parent.resolve())
+
+
+def test_default_dinov3_weights_pypi_uses_lai_data(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr("lai.wizard.Path.home", lambda: tmp_path)
+    got = _default_dinov3_weights_dir(tmp_path / "bundle", dev_checkout=False)
+    assert got == str((tmp_path / "lai-data" / "dinov3-models").resolve())
+
+
+def test_default_dinov3_weights_dev_uses_repo_models(tmp_path: Path):
+    (tmp_path / "backend" / "sam_service" / "models" / "dinov3").mkdir(parents=True)
+    got = _default_dinov3_weights_dir(tmp_path, dev_checkout=True)
+    assert Path(got).as_posix().endswith("backend/sam_service/models/dinov3")
 
 
 def test_resolve_pretrained_families_excludes_yolo_nas():

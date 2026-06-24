@@ -1,8 +1,11 @@
 # Full stack: backend services (dockers/backend/docker-compose.yml) + web UI.
 # Requires Docker Compose v2.24+ (include).
 #
-# Local build (default): docker compose up -d  (from repository root)
-# Pre-built images: set LAI_*_IMAGE in .env, then docker compose pull && docker compose up -d --no-build
+# Developers: use `lai dev` or `lai build` — NOT `docker compose up --build`
+# (backend requires lai-mmyolo:local built via --profile build first).
+#
+# Local build (default): lai dev   or   lai build && lai up
+# Pre-built images: set LAI_*_IMAGE in .env, then lai pull && lai up
 #
 # Project name → container names like lai-backend-1. Override: COMPOSE_PROJECT_NAME.
 name: lai

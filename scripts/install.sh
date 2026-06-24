@@ -24,7 +24,7 @@ for arg in "$@"; do
     --no-bind-code) BIND_CODE=0 ;;
     -h|--help)
       echo "Usage: $0 [--yes] [--help] [--bind-code | --no-bind-code]"
-      echo "  --yes  Non-interactive: env LAI_DATA_DIR, WEB_PORT, optional SAM3_*, LAI_PRETRAINED_MODELS, LAI_DEPTH_MODELS."
+      echo "  --yes  Non-interactive: env LAI_DATA_DIR, WEB_PORT, optional SAM3_*, DINOV3_WEIGHTS_HOST_PATH, LAI_PRETRAINED_MODELS, LAI_DEPTH_MODELS."
       echo "  --bind-code      Mount host backend source at \$LAI_REPO_ROOT/backend → /app (default)."
       echo "  --no-bind-code   Use only the Python code baked into the image for /app (pull/pre-built images)."
       echo "  Non-interactive bind: set LAI_BIND_CODE=0 or LAI_BIND_CODE=1 with --yes; optional LAI_REPO_ROOT=/abs/path/to/repo."
@@ -275,6 +275,35 @@ else
 fi
 mkdir -p "$SAM3_RESOLVED"
 
+# --- DINOv3 / INSID3: folder on disk for .pth checkpoints ---
+echo ""
+echo "DINOv3 weights for INSID3 (optional)"
+echo "  Folder mounted into sam_service for example-based segmentation."
+DEFAULT_DINOV3_DIR="$ROOT/backend/sam_service/models/dinov3"
+DEFAULT_DINOV3_BASE="dinov3_vitb16_pretrain_lvd1689m-73cec8be.pth"
+if [[ "$YES" -eq 1 ]]; then
+  DINOV3_IN="${DINOV3_WEIGHTS_HOST_PATH:-$DEFAULT_DINOV3_DIR}"
+  DINOV3_IN="${DINOV3_IN/#\~/$HOME}"
+  if [[ "$DINOV3_IN" != /* ]]; then
+    DINOV3_RESOLVED="$(cd "$ROOT" && realpath -m "$DINOV3_IN")"
+  else
+    DINOV3_RESOLVED="$DINOV3_IN"
+  fi
+else
+  DINOV3_IN="$(prompt "Folder for DINOv3 weights (INSID3)" "$DEFAULT_DINOV3_DIR")"
+  DINOV3_IN="${DINOV3_IN/#\~/$HOME}"
+  if [[ "$DINOV3_IN" != /* ]]; then
+    DINOV3_RESOLVED="$(cd "$ROOT" && realpath -m "$DINOV3_IN")"
+  else
+    DINOV3_RESOLVED="$DINOV3_IN"
+  fi
+  # User may paste a path to a single .pth file — use its parent folder.
+  if [[ "$DINOV3_RESOLVED" == *.pth ]]; then
+    DINOV3_RESOLVED="$(dirname "$DINOV3_RESOLVED")"
+  fi
+fi
+mkdir -p "$DINOV3_RESOLVED"
+
 # --- Write .env ---
 upsert_env() {
   local key="$1"
@@ -301,6 +330,7 @@ upsert_env WEB_PORT "$WEB_P"
 upsert_env VITE_API_URL "${VITE_API_URL:-$DEFAULT_API_URL}"
 upsert_env SAM3_MODELS_HOST_PATH "$SAM3_RESOLVED"
 upsert_env SAM3_CHECKPOINT_FILENAME "$SAM3_CF"
+upsert_env DINOV3_WEIGHTS_HOST_PATH "$DINOV3_RESOLVED"
 upsert_env LAI_PRETRAINED_MODELS "$PT_SPEC"
 upsert_env LAI_DEPTH_MODELS "$DEPTH_SPEC"
 upsert_env LAI_REPO_ROOT "$REPO_ROOT"
@@ -322,7 +352,18 @@ else
   upsert_env COMPOSE_PROFILES ""
 fi
 
-if [[ "$IS_DEVELOPER" -eq 0 ]] || [[ "$BIND_CODE" -eq 0 ]]; then
+if [[ "$IS_DEVELOPER" -eq 1 ]] && [[ "$BIND_CODE" -eq 1 ]]; then
+  echo "  LAI_*_IMAGE=lai-*:local (build all images locally — use: lai dev)"
+  upsert_env LAI_BACKEND_IMAGE "lai-backend:local"
+  upsert_env LAI_WORKER_GPU_IMAGE "lai-worker-gpu:local"
+  upsert_env LAI_WORKER_GENERAL_IMAGE "lai-worker-general:local"
+  upsert_env LAI_ULTRALYTICS_IMAGE "lai-ultralytics:local"
+  upsert_env LAI_MMYOLO_IMAGE "lai-mmyolo:local"
+  upsert_env LAI_FRONTEND_IMAGE "lai-frontend:local"
+  upsert_env LAI_SAM_IMAGE "lai-sam:local"
+  upsert_env MMCV_USE_PREBUILT "${MMCV_USE_PREBUILT:-1}"
+  upsert_env MMCV_BUILD_JOBS "${MMCV_BUILD_JOBS:-2}"
+elif [[ "$IS_DEVELOPER" -eq 0 ]] || [[ "$BIND_CODE" -eq 0 ]]; then
   if command -v python3 >/dev/null 2>&1; then
     # Resolve image tags from Docker Hub unless the user pinned a version.
     REGISTRY_ARGS=(--env "$ENV_FILE" --bundle-root "$ROOT" --gpu-tier "$GPU_TIER")
@@ -340,6 +381,7 @@ echo "  WEB_PORT=$WEB_P"
 echo "  VITE_API_URL=${VITE_API_URL:-$DEFAULT_API_URL}"
 echo "  SAM3_MODELS_HOST_PATH=$SAM3_RESOLVED"
 echo "  SAM3_CHECKPOINT_FILENAME=$SAM3_CF"
+echo "  DINOV3_WEIGHTS_HOST_PATH=$DINOV3_RESOLVED"
 echo "  LAI_PRETRAINED_MODELS=$PT_SPEC"
 echo "  LAI_DEPTH_MODELS=$DEPTH_SPEC"
 echo "  LAI_REPO_ROOT=$REPO_ROOT"
@@ -383,13 +425,40 @@ else
   fi
 fi
 
+# --- DINOv3 weights (INSID3) ---
+DINOV3_FULL="$DINOV3_RESOLVED/$DEFAULT_DINOV3_BASE"
+echo ""
+if [[ -f "$DINOV3_FULL" ]]; then
+  echo "DINOv3: default INSID3 checkpoint found at $DINOV3_FULL"
+else
+  echo "DINOv3 weights: default INSID3 checkpoint not found at"
+  echo "  $DINOV3_FULL"
+  echo "INSID3 stays disabled until you add weights (SAM 2/3 still work)."
+  echo "Request access and download from Hugging Face (license approval required):"
+  echo "  https://huggingface.co/facebook/dinov3-vits16-pretrain-lvd1689m"
+  echo "Place the .pth file (default: $DEFAULT_DINOV3_BASE) in:"
+  echo "  $DINOV3_RESOLVED"
+  echo ""
+  if [[ "$YES" -eq 1 ]] || [[ "${DINOV3_SKIP_PROMPT:-}" == "1" ]] || [[ "${CI:-}" == "true" ]]; then
+    echo "Continuing without DINOv3 weights (--yes / DINOV3_SKIP_PROMPT / CI)."
+  else
+    read -r -p "Continue without DINOv3 weights? [Y/n] " ans || true
+    case "${ans:-Y}" in
+      [Nn]*) echo "Stopped. Download weights from Hugging Face, copy .pth files, then restart sam_service."; exit 1 ;;
+      *) echo "OK — add weights later and restart sam_service." ;;
+    esac
+  fi
+fi
+
 echo ""
 echo "=========================================="
 echo "  Next steps"
 echo "=========================================="
-echo "  1. Pull:      lai pull   (registry images; skip if you build locally)"
-echo "  2. Start:     lai up"
-echo "  3. Open:      http://localhost:${WEB_P}"
+echo "  1. Build:     lai dev          (developer: ordered local build + start)"
+echo "  1b. Or:       lai build && lai up   (build then start separately)"
+echo "  2. Pull:      lai pull          (registry images; skip if you build locally)"
+echo "  3. Start:     lai up"
+echo "  4. Open:      http://localhost:${WEB_P}"
 echo "  (Next time you can use a browser wizard instead:  lai install-gui )"
 echo ""
 echo "Why Docker (not pip alone)?"

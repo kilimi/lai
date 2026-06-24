@@ -19,6 +19,7 @@ GENERAL_INCLUDE = [
     "app.tasks.annotation_tasks",
     "app.tasks.depth_estimation_tasks",
     "app.tasks.preannotate_tasks",
+    "app.tasks.insid3_tasks",
     "app.tasks.maintenance_tasks",
 ]
 
@@ -41,6 +42,7 @@ TASK_ROUTES = {
     "app.tasks.annotation_tasks.*": {"queue": "general"},
     "app.tasks.depth_estimation_tasks.*": {"queue": "general"},
     "app.tasks.preannotate_tasks.*": {"queue": "general"},
+    "app.tasks.insid3_tasks.*": {"queue": "general"},
     "app.tasks.training_tasks.cleanup_old_tasks": {"queue": "general"},
     "app.tasks.task_monitoring.refresh_worker_gpu_status": {"queue": "gpu"},
     "app.tasks.yolo_training.*": {"queue": "gpu"},
@@ -86,6 +88,7 @@ KNOWN_TASK_QUEUES = {
     "app.tasks.annotation_tasks.merge_annotation_files": "general",
     "app.tasks.depth_estimation_tasks.generate_depth_maps": "general",
     "app.tasks.preannotate_tasks.run_yolo_preannotate": "general",
+    "app.tasks.insid3_tasks.run_insid3_propagate": "general",
     "app.tasks.training_tasks.cleanup_old_tasks": "general",
     "app.tasks.training_tasks.train_yolo_model": "gpu",
     "app.tasks.training_tasks.train_rtdetr_model": "gpu",
