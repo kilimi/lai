@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Dataset, DatasetFormValues } from "@/types";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DatasetForm } from "@/components/DatasetForm";
@@ -14,8 +14,28 @@ interface EditDatasetDialogProps {
 
 export function EditDatasetDialog({ dataset, open, onOpenChange, onDatasetUpdated }: EditDatasetDialogProps) {
   const [loading, setLoading] = useState(false);
+  const [formDataset, setFormDataset] = useState<Dataset>(dataset);
   const { api, isConfigured } = useApi();
   const { toast } = useToast();
+
+  useEffect(() => {
+    setFormDataset(dataset);
+  }, [dataset]);
+
+  useEffect(() => {
+    if (!open || !api || !isConfigured) return;
+
+    let cancelled = false;
+    (async () => {
+      const response = await api.getDataset(String(dataset.id));
+      if (cancelled || !response.success || !response.data) return;
+      setFormDataset(response.data);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, dataset.id, api, isConfigured]);
 
   const handleSubmit = async (data: DatasetFormValues, logoFile?: File) => {
     if (!api || !isConfigured) {
@@ -72,7 +92,7 @@ export function EditDatasetDialog({ dataset, open, onOpenChange, onDatasetUpdate
           <DialogTitle>Edit Dataset</DialogTitle>
         </DialogHeader>
         <DatasetForm
-          initialData={dataset}
+          initialData={formDataset}
           onSubmit={handleSubmit}
           loading={loading}
           mode="edit"

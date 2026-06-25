@@ -215,6 +215,19 @@ export function resolveBackendMediaUrl(
   return h;
 }
 
+/** Dataset card / form logo: prefer thumbnail, fall back to logo_url, resolve for browser img src. */
+export function resolveDatasetLogoUrl(
+  dataset:
+    | { thumbnailUrl?: string | null; logo_url?: string | null }
+    | undefined
+    | null,
+): string | undefined {
+  if (!dataset) return undefined;
+  const raw = (dataset.thumbnailUrl || dataset.logo_url || "").trim();
+  if (!raw) return undefined;
+  return resolveBackendMediaUrl(raw);
+}
+
 /** Normalize image url/thumbnailUrl from API for the current browser origin. */
 export function normalizeImageMedia<T extends { url?: string; thumbnailUrl?: string }>(
   image: T,

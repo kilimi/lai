@@ -32,10 +32,10 @@ export interface AnnotationStatisticsChartsProps {
 }
 
 const tooltipStyle = {
-  backgroundColor: "hsl(var(--popover))",
-  border: "1px solid hsl(var(--border))",
+  backgroundColor: "oklch(var(--popover))",
+  border: "1px solid oklch(var(--border))",
   borderRadius: "6px",
-  color: "hsl(var(--popover-foreground))",
+  color: "oklch(var(--popover-foreground))",
   fontSize: "12px",
 };
 
@@ -103,7 +103,7 @@ export default function AnnotationStatisticsCharts({
                 innerRadius={48}
                 outerRadius={82}
                 paddingAngle={pieData.length > 1 ? 2 : 0}
-                stroke="hsl(var(--background))"
+                stroke="oklch(var(--background))"
                 strokeWidth={2}
               >
                 {pieData.map((entry) => (
@@ -185,7 +185,7 @@ export default function AnnotationStatisticsCharts({
                   <Tooltip
                     contentStyle={tooltipStyle}
                     formatter={(value: number) => [value.toLocaleString(), "Annotations"]}
-                    cursor={{ fill: "hsl(var(--muted) / 0.3)" }}
+                    cursor={{ fill: "oklch(var(--muted) / 0.3)" }}
                   />
                   <Bar dataKey="count" radius={[0, 4, 4, 0]} maxBarSize={28}>
                     <Cell fill={c.color} />

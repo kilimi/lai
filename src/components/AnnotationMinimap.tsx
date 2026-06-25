@@ -64,12 +64,12 @@ export const AnnotationMinimap = ({
     const vh = Math.min(viewHeight, nh) * minimapScale;
 
     // Draw viewport rect
-    ctx.strokeStyle = 'hsl(var(--primary))';
+    ctx.strokeStyle = 'oklch(var(--primary))';
     ctx.lineWidth = 2;
     ctx.strokeRect(vx, vy, vw, vh);
 
     // Semi-transparent fill
-    ctx.fillStyle = 'hsla(var(--primary), 0.1)';
+    ctx.fillStyle = 'oklch(var(--primary) / 0.1)';
     ctx.fillRect(vx, vy, vw, vh);
   }, [imageRef, containerRef, imageScale, imageOffset]);
 

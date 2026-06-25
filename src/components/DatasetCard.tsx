@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { EditDatasetDialog } from "@/components/EditDatasetDialog";
 import { useApi } from "@/hooks/use-api";
-import { resolveBackendMediaUrl } from "@/config/api";
+import { resolveDatasetLogoUrl } from "@/config/api";
 import { useToast } from "@/hooks/use-toast";
 import { detectFormat } from "@/utils/detectFormat";
 import {
@@ -44,7 +44,7 @@ interface DatasetCardProps extends React.HTMLAttributes<HTMLDivElement> {
 }
 
 export function DatasetCard({ dataset, className, onDelete, onDatasetUpdated, onDatasetMoved, ...props }: DatasetCardProps) {
-  const thumbnailSrc = resolveBackendMediaUrl(dataset.thumbnailUrl);
+  const thumbnailSrc = resolveDatasetLogoUrl(dataset);
   // CSS-only fade: track load state directly on the <img> element via onLoad
   // instead of creating a hidden Image() object in a useEffect.
   const [imageLoaded, setImageLoaded] = React.useState(false);

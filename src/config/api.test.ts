@@ -4,6 +4,7 @@ import {
   getApiBaseUrl,
   normalizeApiBaseForBrowser,
   resolveBackendMediaUrl,
+  resolveDatasetLogoUrl,
 } from "./api";
 
 function mockLocation(origin: string, hostname: string) {
@@ -124,6 +125,36 @@ describe("resolveBackendMediaUrl", () => {
     expect(resolveBackendMediaUrl("/static/projects/44/64/images/a.jpg")).toBe(
       "http://localhost:8089/static/projects/44/64/images/a.jpg",
     );
+  });
+});
+
+describe("resolveDatasetLogoUrl", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    localStorage.clear();
+  });
+
+  it("prefers thumbnailUrl and resolves relative paths", () => {
+    vi.stubEnv("VITE_API_URL", "SAME_ORIGIN");
+    mockLocation("http://localhost:8089", "localhost");
+    expect(
+      resolveDatasetLogoUrl({
+        thumbnailUrl: "/static/projects/1/2/logo.jpg",
+        logo_url: "/static/other.jpg",
+      }),
+    ).toBe("http://localhost:8089/static/projects/1/2/logo.jpg");
+  });
+
+  it("falls back to logo_url when thumbnailUrl is missing", () => {
+    vi.stubEnv("VITE_API_URL", "SAME_ORIGIN");
+    mockLocation("http://localhost:8089", "localhost");
+    expect(
+      resolveDatasetLogoUrl({
+        thumbnailUrl: undefined,
+        logo_url: "/static/projects/1/2/logo.jpg",
+      }),
+    ).toBe("http://localhost:8089/static/projects/1/2/logo.jpg");
   });
 });
 

@@ -306,7 +306,7 @@ export function DatasetEvalPicker({
           "hover:border-border hover:shadow-sm",
           !isDense && "hover:-translate-y-[1px]",
           isSelected
-            ? "border-primary/60 bg-primary/[0.04] shadow-[0_0_0_1px_hsl(var(--primary)/0.25)]"
+            ? "border-primary/60 bg-primary/[0.04] shadow-[0_0_0_1px_oklch(var(--primary)/0.25)]"
             : "border-border/60",
           !usable && !isSelected && "opacity-55 hover:opacity-90",
           incompatible && !isSelected && "opacity-40 grayscale"

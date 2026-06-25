@@ -329,6 +329,7 @@ const ImageAnnotation = () => {
   const annotationFileLoadGenerationRef = useRef(0);
   /** Monotonic token so stale async annotation loads cannot commit after navigating to another image. */
   const pendingAnnotationLoadTokenRef = useRef(0);
+  const refreshClassImageMapRef = useRef<(() => void) | null>(null);
   // Always-current image name ref so stale useCallback closures can still access the latest value
   const currentImageNameRef = useRef<string>('');
   // Always-current load function ref so stale callbacks can call the latest version
@@ -497,17 +498,25 @@ const ImageAnnotation = () => {
     setShowSamModelWaitOverlay(false);
   }, []);
 
+  const prevSegmentModelRef = useRef<SegmentModelChoice | null>(null);
   useEffect(() => {
-    if (segmentModel === 'insid3' && classes.length > 0) {
+    const prev = prevSegmentModelRef.current;
+    prevSegmentModelRef.current = segmentModel;
+    const switchedToInsid3 = segmentModel === 'insid3' && prev !== 'insid3';
+    const initialInsid3 = prev === null && segmentModel === 'insid3';
+    if ((switchedToInsid3 || initialInsid3) && classes.length > 0) {
       setActiveTool('auto-segment');
     }
+  }, [segmentModel, classes.length]);
+
+  useEffect(() => {
     if (segmentModel === 'insid3' && activeTool === 'auto-segment') {
       setSamPoints([]);
       samPointsRef.current = [];
       clearSamReadyOverlayTimer();
       setIsSamModelLoading(false);
     }
-  }, [segmentModel, activeTool, classes.length, clearSamReadyOverlayTimer]);
+  }, [segmentModel, activeTool, clearSamReadyOverlayTimer]);
 
   // Reset preview/points when switching between SAM and INSID3 (avoid stale overlays).
   useEffect(() => {
@@ -1009,6 +1018,7 @@ const ImageAnnotation = () => {
           : `Added ${newAnns.length} ${annLabelPlural}.`,
     });
     computeGlobalStatsDebounced();
+    refreshClassImageMapRef.current?.();
   };
 
   const cancelAutoSegment = () => {
@@ -1965,25 +1975,60 @@ const ImageAnnotation = () => {
       } catch { /* ignore */ }
     }
 
-    // Overlay localStorage edits
-    const overlayCollId = displayLayer || mainLayer || 'default';
-    const prefix = `annotations_${id}_${overlayCollId}_`;
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (!key || !key.startsWith(prefix)) continue;
-      const imageName = key.substring(prefix.length);
-      if (!imageName) continue;
-      // Drop existing COCO-derived associations for this image, then rebuild from local
+    // Overlay localStorage edits (all companion layers — not only the active display layer).
+    const collIds = new Set<string>(['default']);
+    const trackColl = (cid: string | null | undefined) => {
+      if (cid != null && String(cid).trim() !== '') collIds.add(String(cid));
+    };
+    trackColl(mainLayer);
+    trackColl(displayLayer);
+    for (const c of imageCollections) trackColl(String(c.id));
+
+    const localImages = new Set<string>();
+    for (const collId of collIds) {
+      const prefix = `annotations_${id}_${collId}_`;
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (!key || !key.startsWith(prefix) || key.endsWith('_dims')) continue;
+        const imageName = key.substring(prefix.length);
+        if (imageName) localImages.add(imageName);
+      }
+    }
+
+    for (const imageName of localImages) {
       Object.keys(map).forEach(cn => remove(cn, imageName));
-      const saved = localStorage.getItem(key);
-      if (!saved) continue;
-      try {
-        const parsed = JSON.parse(saved) as AnnotationShape[];
-        parsed.forEach(a => add(a.label, imageName));
-      } catch { /* ignore */ }
+      const labels = new Set<string>();
+      for (const collId of collIds) {
+        const saved = localStorage.getItem(`annotations_${id}_${collId}_${imageName}`);
+        if (!saved) continue;
+        try {
+          (JSON.parse(saved) as AnnotationShape[]).forEach(a => {
+            if (a.label) labels.add(a.label);
+          });
+        } catch { /* ignore */ }
+      }
+      labels.forEach(cn => add(cn, imageName));
     }
     return map;
-  }, [id, displayLayer, mainLayer]);
+  }, [id, displayLayer, mainLayer, imageCollections]);
+
+  const refreshClassImageMap = useCallback(() => {
+    try {
+      setClassImageMap(buildClassImageMap());
+    } catch (e) {
+      console.warn('Could not refresh class->image map:', e);
+    }
+  }, [buildClassImageMap]);
+  refreshClassImageMapRef.current = refreshClassImageMap;
+
+  /** Class-filter navigation must read fresh localStorage, not debounced React state. */
+  const getNavigableImageNamesFresh = useCallback(() => {
+    if (!classFilterName) return baseNavigableImageNames;
+    const map = buildClassImageMap();
+    const filterSet = map[classFilterName];
+    if (!filterSet || filterSet.size === 0) return baseNavigableImageNames;
+    return baseNavigableImageNames.filter((n) => filterSet.has(n));
+  }, [baseNavigableImageNames, classFilterName, buildClassImageMap]);
 
   const computeGlobalStats = useCallback(async () => {
     try {
@@ -2173,22 +2218,24 @@ const ImageAnnotation = () => {
                 imageFileNameToId[imageName] != null
                   ? { id: imageFileNameToId[imageName] }
                   : findCocoImageForDatasetName(cocoData.images, imageName);
-              if (cocoImg == null || cocoImg.id == null) continue;
-              const imgIdStr = cocoImg.id.toString();
-              const cocoImgCounts = cocoCountsByImage[imgIdStr] || {};
-              const cocoImgAreas = cocoAreasByImage[imgIdStr] || {};
-              Object.keys(cocoImgCounts).forEach(cn => {
-                counts[cn] = (counts[cn] || 0) - cocoImgCounts[cn];
-                if (counts[cn] <= 0) delete counts[cn];
-              });
-              Object.keys(cocoImgAreas).forEach(cn => {
-                totalAreas[cn] = (totalAreas[cn] || 0) - cocoImgAreas[cn];
-                if (totalAreas[cn] <= 0) delete totalAreas[cn];
-              });
-              // Local overlay supersedes COCO for this image — drop any class associations
-              // that came from the COCO file for this image so we can rebuild from local data.
-              const overlayImgName = imageIdToFileName[imgIdStr] || imageName;
-              Object.keys(imagesByClass).forEach(cn => removeImageFromClass(cn, overlayImgName));
+              if (cocoImg != null && cocoImg.id != null) {
+                const imgIdStr = cocoImg.id.toString();
+                const cocoImgCounts = cocoCountsByImage[imgIdStr] || {};
+                const cocoImgAreas = cocoAreasByImage[imgIdStr] || {};
+                Object.keys(cocoImgCounts).forEach(cn => {
+                  counts[cn] = (counts[cn] || 0) - cocoImgCounts[cn];
+                  if (counts[cn] <= 0) delete counts[cn];
+                });
+                Object.keys(cocoImgAreas).forEach(cn => {
+                  totalAreas[cn] = (totalAreas[cn] || 0) - cocoImgAreas[cn];
+                  if (totalAreas[cn] <= 0) delete totalAreas[cn];
+                });
+                const overlayImgName = imageIdToFileName[imgIdStr] || imageName;
+                Object.keys(imagesByClass).forEach(cn => removeImageFromClass(cn, overlayImgName));
+              } else {
+                // Image only exists in local overlay (not in COCO file) — still index it.
+                Object.keys(imagesByClass).forEach(cn => removeImageFromClass(cn, imageName));
+              }
               const saved = localStorage.getItem(key);
               if (!saved) continue;
               try {
@@ -2199,7 +2246,7 @@ const ImageAnnotation = () => {
                     const area = calculatePolygonArea(a.points);
                     totalAreas[a.label] = (totalAreas[a.label] || 0) + area;
                   }
-                  addImageToClass(a.label, overlayImgName);
+                  addImageToClass(a.label, imageName);
                 });
               } catch (err) {
                 // ignore parse errors
@@ -3482,7 +3529,8 @@ const ImageAnnotation = () => {
       description: `${type} annotation added for class "${classObj.name}"`,
     });
     computeGlobalStatsDebounced();
-  }, [selectedClass, classes, toast, currentImage, id, computeGlobalStatsDebounced]);
+    refreshClassImageMap();
+  }, [selectedClass, classes, toast, currentImage, id, computeGlobalStatsDebounced, refreshClassImageMap]);
 
   const handleCanvasMouseDown = useCallback((e: React.MouseEvent) => {
     if (!canvasRef.current || !currentImage) return;
@@ -4584,6 +4632,7 @@ const ImageAnnotation = () => {
       });
     }
     computeGlobalStatsDebounced();
+    refreshClassImageMap();
 
     if (selectedAnnotation === annotationId) {
       setSelectedAnnotation(null);
@@ -6206,9 +6255,6 @@ const ImageAnnotation = () => {
   }, [classFilterName, classImageMap, navigableImageNames]);
 
   const navigateImage = useCallback(async (direction: 'prev' | 'next') => {
-    const imageList = navigableImageNames;
-    if (imageList.length === 0) return;
-    
     // Save current image annotations to localStorage and database before navigating
     if (currentImageName) {
       try {
@@ -6240,6 +6286,7 @@ const ImageAnnotation = () => {
           console.error('Error saving to localStorage:', e);
         }
       }
+      refreshClassImageMap();
       // Save to database if in edit mode and has changes
       if (annotationId && hasUnsavedChanges) {
         await saveCurrentImageToDatabase();
@@ -6249,6 +6296,9 @@ const ImageAnnotation = () => {
         await computeGlobalStats();
       }
     }
+
+    const imageList = getNavigableImageNamesFresh();
+    if (imageList.length === 0) return;
     
     // Determine target image. When a class filter is active, navigate only through
     // images that contain that class (intersected with the current layer's images).
@@ -6257,14 +6307,20 @@ const ImageAnnotation = () => {
       ? Math.min(currentImageIndex + 1, imageList.length - 1)
       : Math.max(currentImageIndex - 1, 0);
 
-    // Clean up localStorage - remove cached annotations for images that are far away (more than 5 images)
+    // Prune empty local cache slots far from the cursor — never drop unsaved annotations.
     try {
       for (let i = 0; i < imageList.length; i++) {
         if (Math.abs(i - newIndex) > 5) {
           const oldStorageKey = `annotations_${id}_${annotationStorageCollId}_${imageList[i]}`;
-          if (localStorage.getItem(oldStorageKey)) {
-            localStorage.removeItem(oldStorageKey);
+          const cached = localStorage.getItem(oldStorageKey);
+          if (!cached) continue;
+          try {
+            const parsed = JSON.parse(cached);
+            if (Array.isArray(parsed) && parsed.length > 0) continue;
+          } catch {
+            continue;
           }
+          localStorage.removeItem(oldStorageKey);
         }
       }
     } catch (e) {
@@ -6284,7 +6340,7 @@ const ImageAnnotation = () => {
     
     // Load annotations for the new image
     loadAnnotationsForImage(newImageName);
-  }, [currentImageIndex, navigableImageNames, displayLayer, imageCollections, loadAnnotationsForImage, currentImageName, annotations, id, annotationId, hasUnsavedChanges, saveCurrentImageToDatabase, annotationStorageCollId]);
+  }, [currentImageIndex, getNavigableImageNamesFresh, displayLayer, imageCollections, loadAnnotationsForImage, currentImageName, annotations, id, annotationId, hasUnsavedChanges, saveCurrentImageToDatabase, annotationStorageCollId, refreshClassImageMap, computeGlobalStats]);
 
   // Keyboard shortcuts: Arrow keys or A/D for previous/next image navigation
   useEffect(() => {
@@ -7400,9 +7456,11 @@ const ImageAnnotation = () => {
                               className={`h-6 w-6 p-0 hover:bg-muted ${classFilterName === classObj.name ? 'bg-primary/15 ring-1 ring-primary/40' : ''}`}
                               onClick={(e) => {
                                 e.stopPropagation();
+                                const freshMap = buildClassImageMap();
+                                setClassImageMap(freshMap);
                                 const nav = resolveClassFilterToggleNavigation(
                                   baseNavigableImageNames,
-                                  classImageMap,
+                                  freshMap,
                                   classFilterName,
                                   classObj.name,
                                 );

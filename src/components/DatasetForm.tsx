@@ -18,6 +18,7 @@ import {
 import { Loader2, Image as ImageIcon, UploadCloud, X, Tag, Plus } from "lucide-react";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useToast } from "@/hooks/use-toast";
+import { resolveDatasetLogoUrl } from "@/config/api";
 
 const datasetSchema = z.object({
   name: z.string().min(2, { message: "Name must be at least 2 characters" }).max(50, { message: "Name cannot exceed 50 characters" }),
@@ -38,7 +39,9 @@ interface DatasetFormProps {
 
 export function DatasetForm({ initialData, onSubmit, loading = false, mode = "create", projectMode = false, projectId }: DatasetFormProps) {
   const [logoFile, setLogoFile] = useState<File | null>(null);
-  const [logoPreview, setLogoPreview] = useState<string | undefined>(initialData?.thumbnailUrl);
+  const [logoPreview, setLogoPreview] = useState<string | undefined>(() =>
+    resolveDatasetLogoUrl(initialData),
+  );
   const [tags, setTags] = useState<string[]>(initialData?.tags || []);
   const [tagInput, setTagInput] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -65,10 +68,10 @@ export function DatasetForm({ initialData, onSubmit, loading = false, mode = "cr
       setTags(initialData.tags || []);
       // Only update logoPreview if no new file is selected
       if (!logoFile) {
-        setLogoPreview(initialData.thumbnailUrl);
+        setLogoPreview(resolveDatasetLogoUrl(initialData));
       }
     }
-  }, [initialData?.id, initialData?.thumbnailUrl, mode, logoFile, form]);
+  }, [initialData?.id, initialData?.thumbnailUrl, initialData?.logo_url, mode, logoFile, form, initialData]);
   
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
