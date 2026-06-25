@@ -10,6 +10,7 @@ from pathlib import Path
 import lai
 from lai.compose_build import build_stack, developer_build_status, ensure_developer_build_env, missing_runtime_images, should_build_stack, uses_local_build
 from lai.compose_pull import missing_registry_images, pull_stack
+from lai.compose_up import up_stack
 from lai.compose_files import ensure_compose_env
 from lai.paths import _candidate_repo_root, bundle_data_dir, config_dir, get_bundle_root, resolve_env_file
 from lai.uninstall import run_uninstall
@@ -235,7 +236,7 @@ def cmd_dev(ns: argparse.Namespace) -> int:
     if rc != 0:
         return rc
     extra = ns.docker_compose_args or []
-    return _run(["docker", "compose", "up", "-d", *extra], root)
+    return up_stack(root, extra)
 
 
 def cmd_pull(ns: argparse.Namespace) -> int:
@@ -260,7 +261,7 @@ def cmd_upgrade(ns: argparse.Namespace) -> int:
     rc = pull_stack(root)
     if rc != 0:
         return rc
-    return _run(["docker", "compose", "up", "-d", *(ns.docker_compose_args or [])], root)
+    return up_stack(root, ns.docker_compose_args or [])
 
 
 def cmd_up(ns: argparse.Namespace) -> int:
@@ -304,10 +305,8 @@ def cmd_up(ns: argparse.Namespace) -> int:
         if rc != 0:
             return rc
 
-    cmd = ["docker", "compose", "up", "-d"]
     # Images already built in order; avoid compose --build (wrong order for ML runtimes).
-    cmd.extend(extra)
-    return _run(cmd, root)
+    return up_stack(root, extra)
 
 
 def cmd_down(ns: argparse.Namespace) -> int:
