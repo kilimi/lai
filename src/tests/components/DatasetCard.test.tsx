@@ -20,6 +20,10 @@ vi.mock("@/utils/animations", () => ({
 
 vi.mock("@/config/api", () => ({
   resolveBackendMediaUrl: (url: string) => url || "",
+  resolveDatasetLogoUrl: (dataset: { thumbnailUrl?: string; logo_url?: string }) => {
+    const raw = (dataset?.thumbnailUrl || dataset?.logo_url || "").trim();
+    return raw || undefined;
+  },
 }));
 
 vi.mock("@/utils/detectFormat", () => ({

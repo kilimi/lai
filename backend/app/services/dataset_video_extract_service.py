@@ -182,6 +182,7 @@ async def extract_frames_from_video_service(
         frame_idx = 0
         extracted = 0
         uploaded_images = []
+        overwritten_count = 0
         last_progress_push = time.time()
 
         try:
@@ -233,6 +234,23 @@ async def extract_frames_from_video_service(
                 # Get file size from stat — avoids re-reading the whole file just for len()
                 file_size = file_path.stat().st_size
                 relative_url = f"/static/projects/{project_id}/{dataset_id}/images/{url_path}"
+
+                if sequential_names:
+                    stale_rows = (
+                        db.query(models.Image)
+                        .filter(
+                            models.Image.dataset_id == dataset_id,
+                            models.Image.collection_id == target_collection.id,
+                            models.Image.file_name == final_filename,
+                        )
+                        .all()
+                    )
+                    if stale_rows:
+                        overwritten_count += len(stale_rows)
+                        for stale in stale_rows:
+                            db.delete(stale)
+                        db.flush()
+
                 db_image = models.Image(
                     dataset_id=dataset_id,
                     collection_id=target_collection.id,
@@ -266,8 +284,11 @@ async def extract_frames_from_video_service(
 
         _progress(stage="saving", extracted=extracted, total=projected_extractions or extracted, percent=99.0)
 
-        # Avoid an extra COUNT(*) — image_count was already accurate before this upload.
-        dataset.image_count = (dataset.image_count or 0) + len(uploaded_images)
+        # Replace stale sequential rows in-place so image_count stays accurate.
+        dataset.image_count = max(
+            0,
+            (dataset.image_count or 0) - overwritten_count + len(uploaded_images),
+        )
         db.commit()
         set_random_image_as_logo(dataset, db, base_url)
 
@@ -294,7 +315,7 @@ async def extract_frames_from_video_service(
             "success": True,
             "data": {
                 "uploaded": len(uploaded_images),
-                "overwritten": 0,
+                "overwritten": overwritten_count,
                 "images": response_images
             }
         }

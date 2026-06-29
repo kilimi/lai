@@ -110,6 +110,7 @@ import {
   findCocoImageForDatasetName,
   findCorrespondingImageInCollection,
   formatArea,
+  imageLayerDimsKey,
   pickPreferredRgbCollection,
   pointsToBbox,
   resolveClassFilterToggleNavigation,
@@ -352,24 +353,30 @@ const ImageAnnotation = () => {
    */
   const getAnnotReferenceDimensions = useCallback((fileName: string | undefined) => {
     if (!fileName) return undefined;
+    const activeCollId = displayLayerRef.current || mainLayerRef.current || 'default';
+    const layerKey = imageLayerDimsKey(activeCollId, fileName);
+    const pixelSource =
+      displayImage?.fileName === fileName
+        ? displayImage
+        : currentImage?.fileName === fileName
+          ? currentImage
+          : null;
+
     const imgEl = imageRef.current;
     const nw = imgEl?.naturalWidth ?? 0;
     const nh = imgEl?.naturalHeight ?? 0;
-    if (
-      currentImage?.fileName === fileName
-      && imgEl?.complete
-      && nw > 0
-      && nh > 0
-    ) {
+    if (pixelSource && imgEl?.complete && nw > 0 && nh > 0) {
       return { width: nw, height: nh };
     }
-    if (currentImage?.fileName === fileName && currentImage.width > 0 && currentImage.height > 0) {
-      return { width: currentImage.width, height: currentImage.height };
+    if (pixelSource && pixelSource.width > 0 && pixelSource.height > 0) {
+      return { width: pixelSource.width, height: pixelSource.height };
     }
+    const layerDims = cocoImageDimensionsRef.current[layerKey];
+    if (layerDims && layerDims.width > 0 && layerDims.height > 0) return layerDims;
     const coco = cocoImageDimensionsRef.current[fileName];
     if (coco && coco.width > 0 && coco.height > 0) return coco;
     return undefined;
-  }, [currentImage]);
+  }, [currentImage, displayImage]);
 
   const [isDrawing, setIsDrawing] = useState(false);
   const [currentPath, setCurrentPath] = useState<Point[]>([]);
@@ -1137,7 +1144,9 @@ const ImageAnnotation = () => {
       return;
     }
     const annotColl = imageCollections.find(c => String(c.id) === annotationLayerId);
-    const annotImg = annotColl?.images.find(i => i.fileName === currentImageName);
+    const annotImg = annotColl
+      ? findCorrespondingImageInCollection(annotColl, currentImageName, displayImage)
+      : null;
     if (annotImg && annotImg.width > 0 && annotImg.height > 0 && displayImage.width > 0 && displayImage.height > 0) {
       annotLayerDimsRef.current = { width: annotImg.width, height: annotImg.height };
       annotScaleToAnnotRef.current = {
@@ -1486,6 +1495,7 @@ const ImageAnnotation = () => {
       annotRefLen: annotationsRef.current.length,
     });
     lastLoadedAnnotationKeyRef.current = '';
+    updateCurrentImages(currentImageName, displayLayer, imageCollections);
     loadAnnotationsForImageRef.current?.(currentImageName, displayLayer || mainLayer || 'default');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [displayLayer]);
@@ -1517,16 +1527,26 @@ const ImageAnnotation = () => {
 
 
   const updateCurrentImages = (imageName: string, layerId: string, collections: ImageCollection[]) => {
-    const preferredRgb = pickPreferredRgbCollection(collections);
+    const mainLayerCollection = collections.find(c => String(c.id) === String(mainLayer));
     let foundCurrentImage: Image | null = null;
 
-    if (preferredRgb) {
-      foundCurrentImage = preferredRgb.images.find(img => img.fileName === imageName) || null;
+    // Navigation metadata must come from the main layer, not RGB — sequential video
+    // frames share names (0001.jpg) across collections and RGB-first lookup showed
+    // the wrong collection's bitmap/metadata after layer switches.
+    if (mainLayerCollection) {
+      foundCurrentImage = findCorrespondingImageInCollection(mainLayerCollection, imageName, null);
+    }
+
+    if (!foundCurrentImage) {
+      const preferredRgb = pickPreferredRgbCollection(collections);
+      if (preferredRgb) {
+        foundCurrentImage = findCorrespondingImageInCollection(preferredRgb, imageName, null);
+      }
     }
 
     if (!foundCurrentImage) {
       for (const collection of collections) {
-        const img = collection.images.find(i => i.fileName === imageName);
+        const img = findCorrespondingImageInCollection(collection, imageName, null);
         if (img) {
           foundCurrentImage = img;
           break;
@@ -1535,8 +1555,6 @@ const ImageAnnotation = () => {
     }
 
     setCurrentImage(foundCurrentImage);
-
-    const mainLayerCollection = collections.find(c => String(c.id) === String(mainLayer));
     if (mainLayerCollection) {
       const mainLayerImageNames = mainLayerCollection.images.map(img => img.fileName).sort();
       setCurrentLayerImageNames(prev => {
@@ -1640,6 +1658,7 @@ const ImageAnnotation = () => {
     setAnnotations(mapped);
     if (dims && dims.width > 0 && dims.height > 0) {
       cocoImageDimensionsRef.current[imageName] = dims;
+      cocoImageDimensionsRef.current[imageLayerDimsKey(activeCollId, imageName)] = dims;
     }
     const persistId = persistToCollId ?? activeCollId;
     if (id && mapped.length > 0) {
@@ -5086,6 +5105,8 @@ const ImageAnnotation = () => {
         if (dims.width > 0 && dims.height > 0) return dims;
       } catch { /* ignore */ }
     }
+    const layerDims = cocoImageDimensionsRef.current[imageLayerDimsKey(collId, imageName)];
+    if (layerDims && layerDims.width > 0 && layerDims.height > 0) return layerDims;
     const cocoDims = cocoImageDimensionsRef.current[imageName];
     if (cocoDims && cocoDims.width > 0 && cocoDims.height > 0) return cocoDims;
     if (imageName === currentImageName) {
@@ -6471,14 +6492,20 @@ const ImageAnnotation = () => {
         }
       }
 
-      // Clean up localStorage - remove cached annotations for images that are far away (more than 5 images)
+      // Prune empty local cache slots far from the cursor — never drop unsaved annotations.
       try {
         for (let i = 0; i < imageList.length; i++) {
           if (Math.abs(i - index) > 5) {
             const oldStorageKey = `annotations_${id}_${annotationStorageCollId}_${imageList[i]}`;
-            if (localStorage.getItem(oldStorageKey)) {
-              localStorage.removeItem(oldStorageKey);
+            const cached = localStorage.getItem(oldStorageKey);
+            if (!cached) continue;
+            try {
+              const parsed = JSON.parse(cached);
+              if (Array.isArray(parsed) && parsed.length > 0) continue;
+            } catch {
+              continue;
             }
+            localStorage.removeItem(oldStorageKey);
           }
         }
       } catch (e) {
@@ -7560,7 +7587,7 @@ const ImageAnnotation = () => {
               return bitmap ? (
               <>
                 <img
-                  key={`layer-${layerSwitchCounterRef.current}-${displayLayer}`}
+                  key={`layer-${layerSwitchCounterRef.current}-${displayLayer}-${bitmap.id ?? bitmap.url}`}
                   ref={imageRef}
                   src={resolveBackendMediaUrl(bitmap.url) || bitmap.url || ''}
                   alt={bitmap.fileName || 'Current image'}
