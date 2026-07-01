@@ -24,7 +24,7 @@ vi.mock('@/components/DatasetEvalPicker', () => ({
       onChange?.([
         {
           datasetId: 1,
-          annotationFileId: 'file1',
+          annotationFileId: null,
           collectionId: 'col1',
         },
       ]);
@@ -318,6 +318,60 @@ describe('EvaluateModelModal - NMS IoU Threshold', () => {
 });
 
 describe('EvaluateModelModal - API Integration', () => {
+  it('submits single-dataset evaluation with null annotationFileId', async () => {
+    const mockOnEvaluate = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <EvaluateModelModal
+        open={true}
+        onOpenChange={vi.fn()}
+        trainingTasks={[
+          {
+            id: 1,
+            name: 'Test Model',
+            status: 'completed',
+            task_type: 'yolo_training',
+            created_at: '2024-01-01',
+            updated_at: '2024-01-01',
+            project_id: 1,
+            progress: 100,
+            task_metadata: { image_size: 640 },
+          },
+        ]}
+        resourcesLoading={false}
+        projectId="1"
+        datasets={[
+          {
+            id: 1,
+            name: 'Test Dataset',
+            image_dir: '/test',
+            created_at: '2024-01-01',
+            updated_at: '2024-01-01',
+            project_id: 1,
+            annotation_files: [],
+          },
+        ] as any}
+        datasetGroups={[]}
+        onEvaluate={mockOnEvaluate}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/1 dataset\(s\) selected\./i)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /next/i }));
+    const selects = await screen.findAllByTestId('select');
+    fireEvent.change(selects[0], { target: { value: '1' } });
+    fireEvent.click(screen.getByRole('button', { name: /next/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /start evaluation/i }));
+
+    await waitFor(() => {
+      expect(mockOnEvaluate).toHaveBeenCalled();
+    });
+    expect(mockOnEvaluate.mock.calls[0][0].annotationFileId).toBeNull();
+  });
+
   it('passes nmsIouThreshold to onEvaluate callback', async () => {
     const mockOnEvaluate = vi.fn().mockResolvedValue(undefined);
     

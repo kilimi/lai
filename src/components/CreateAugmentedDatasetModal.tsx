@@ -514,14 +514,14 @@ export const CreateAugmentedDatasetModal = ({ open, onOpenChange, projectId, dat
     setDatasetSelections(prev => {
       const prevById = new Map(prev.map(s => [s.dataset.id, s]));
       const updated: DatasetSelection[] = [];
-      const toFetch: { selectionId: string; datasetId: number; needAnnotations: boolean }[] = [];
+      const toFetch: { selectionId: string; datasetId: number }[] = [];
 
       next.forEach(n => {
         const existing = prevById.get(n.datasetId);
         if (existing) {
           updated.push({
             ...existing,
-            annotationFileId: n.annotationFileId ?? null,
+            annotationFileId: null,
             collectionId: n.collectionId ?? null,
           });
         } else {
@@ -535,23 +535,21 @@ export const CreateAugmentedDatasetModal = ({ open, onOpenChange, projectId, dat
             collectionId: n.collectionId ?? null,
             imageCollections: [],
             loadingCollections: true,
-            annotationFileId: n.annotationFileId ?? null,
+            annotationFileId: null,
             annotationFiles: [],
-            loadingAnnotations: (dataset.annotation_count || 0) > 0,
+            loadingAnnotations: false,
           });
           toFetch.push({
             selectionId: id,
             datasetId: dataset.id,
-            needAnnotations: (dataset.annotation_count || 0) > 0,
           });
         }
       });
 
       // Trigger lazy fetches for newly added selections
-      toFetch.forEach(({ selectionId, datasetId, needAnnotations }) => {
+      toFetch.forEach(({ selectionId, datasetId }) => {
         setTimeout(() => {
           fetchImageCollectionsForSelection(selectionId, datasetId);
-          if (needAnnotations) fetchAnnotationFilesForSelection(selectionId, datasetId);
         }, 0);
       });
 
@@ -818,7 +816,7 @@ export const CreateAugmentedDatasetModal = ({ open, onOpenChange, projectId, dat
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="w-[min(96vw,1680px)] max-w-none h-[min(92vh,1200px)] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <FolderPlus className="w-5 h-5 text-yellow-600" />
@@ -872,7 +870,7 @@ export const CreateAugmentedDatasetModal = ({ open, onOpenChange, projectId, dat
               <Label>Source Datasets</Label>
               {datasetSelections.length > 0 && (
                 <span className="text-xs text-muted-foreground">
-                  {datasetSelections.length} selected · {datasetSelections.filter(s => s.annotationFileId).length} with annotations
+                  {datasetSelections.length} selected
                 </span>
               )}
             </div>
@@ -887,6 +885,8 @@ export const CreateAugmentedDatasetModal = ({ open, onOpenChange, projectId, dat
                 datasets={pickerDatasets}
                 groups={pickerGroups}
                 modelClasses={[]}
+                pickerMode="augment"
+                requireAnnotationSelection={false}
                 value={pickerValue}
                 onChange={handlePickerChange}
               />

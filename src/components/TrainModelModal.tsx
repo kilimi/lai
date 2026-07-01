@@ -1403,7 +1403,7 @@ export function TrainModelModal({ open, onOpenChange, datasets = [], datasetGrou
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto bg-background z-50">
+        <DialogContent className="w-[min(96vw,1680px)] max-w-none h-[min(92vh,1200px)] overflow-y-auto bg-background z-50">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Brain className="h-5 w-5" />
@@ -1488,6 +1488,8 @@ export function TrainModelModal({ open, onOpenChange, datasets = [], datasetGrou
                   datasets={pickerDatasets}
                   groups={pickerGroups}
                   modelClasses={[]}
+                  pickerMode="train"
+                  requireAnnotationSelection={true}
                   requiredTaskType={requiredAnnotationTaskType}
                   value={pickerValue}
                   onChange={handlePickerChange}

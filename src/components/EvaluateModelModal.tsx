@@ -380,7 +380,7 @@ export function EvaluateModelModal({
           const { annotationFiles } = await enrichDataset(dataset);
           annotationFiles.forEach((f: any) => void loadFileClasses(sel.datasetId, String(f.id)));
 
-          // Apply defaults: first annotation file (if exists) and first/default collection
+          // Apply defaults: first/default image collection only.
           const colsResp = await api.getImageCollections(sel.datasetId).catch(() => null);
           const cols = (colsResp && (colsResp as any).success && (colsResp as any).data) || [];
           setDatasetCollections(prev => {
@@ -388,25 +388,20 @@ export function EvaluateModelModal({
             n.set(sel.datasetId, cols as any[]);
             return n;
           });
-          const defaultFileId = sel.annotationFileId
-            ?? (annotationFiles.length > 0 ? String(annotationFiles[0].id) : null);
           const defaultColl = (cols as any[]).find((c: any) => c.is_default) || (cols as any[])[0];
           const defaultCollId = sel.collectionId ?? (defaultColl ? String(defaultColl.id) : null);
 
-          if (defaultFileId !== sel.annotationFileId || defaultCollId !== sel.collectionId) {
-            const file = annotationFiles.find((f: any) => String(f.id) === defaultFileId);
+          if (defaultCollId !== sel.collectionId) {
             setSelectedDatasets(prev => prev.map(s =>
               s.datasetId === sel.datasetId
                 ? {
                     ...s,
-                    annotationFileId: defaultFileId,
-                    annotationFileName: file ? (file.file_name || file.name) : s.annotationFileName,
                     collectionId: defaultCollId,
                   }
                 : s
             ));
           }
-          if (defaultFileId) void fetchCollectionCountsForSelection(sel.datasetId, defaultFileId);
+          if (sel.annotationFileId) void fetchCollectionCountsForSelection(sel.datasetId, sel.annotationFileId);
           continue;
         }
       }
@@ -504,7 +499,7 @@ export function EvaluateModelModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="w-[min(96vw,1680px)] max-w-none h-[min(92vh,1200px)] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Brain className="h-5 w-5" />
@@ -565,12 +560,12 @@ export function EvaluateModelModal({
                 </Label>
                 {selectedDatasets.length > 0 && (
                   <span className="text-xs text-muted-foreground">
-                    {selectedDatasets.filter((s) => s.annotationFileId).length} with ground truth
+                    Annotation file selection is optional per dataset
                   </span>
                 )}
               </div>
               <p className="text-xs text-muted-foreground">
-                Pick one or more datasets. Any ground-truth file works (boxes, masks, classification) — or choose none for predictions-only.
+                Pick one or more datasets and choose image collections. Annotation file selection is not required per dataset.
               </p>
 
               {datasets.length === 0 && datasetGroups.length === 0 ? (
@@ -585,6 +580,7 @@ export function EvaluateModelModal({
                   modelClasses={modelClasses}
                   modelTaskType={modelTaskType}
                   pickerMode="evaluate"
+                  requireAnnotationSelection={false}
                   value={pickerValue}
                   onChange={handlePickerChange}
                 />
