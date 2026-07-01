@@ -2469,7 +2469,7 @@ const ImageAnnotation = () => {
         textPrompt: segmentTextPrompt.trim(),
         className: classObj.name,
         totalImages: total,
-        imagesWithMatches,
+        imagesWithMatches: imagesWithAnnotations,
         annotationsAdded: addedCount,
         failCount,
       });
@@ -2509,7 +2509,7 @@ const ImageAnnotation = () => {
       textPrompt: segmentTextPrompt.trim(),
       className: classObj.name,
       totalImages: total,
-      imagesWithMatches,
+      imagesWithMatches: imagesWithAnnotations,
       annotationsAdded: addedCount,
       failCount,
     });

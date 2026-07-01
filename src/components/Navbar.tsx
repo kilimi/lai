@@ -20,6 +20,8 @@ type GpuStatus = {
   memory_total_mb: number;
   source?: string;
   status?: string;
+  gpu_tier_configured?: boolean;
+  gpu_features_message?: string | null;
 };
 
 export function Navbar() {
@@ -85,6 +87,15 @@ export function Navbar() {
   }, []);
 
   const formatMb = (mb: number) => (mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`);
+  const gpuStatusText = gpuLoading
+    ? "Checking"
+    : gpuStatus?.has_gpu
+      ? `${formatMb(gpuStatus.memory_used_mb)} / ${formatMb(gpuStatus.memory_total_mb)}`
+      : gpuStatus?.status === "unknown" || gpuStatus?.source === "unknown"
+        ? "Detecting"
+        : gpuStatus?.gpu_tier_configured
+          ? "Worker offline"
+          : "No GPU";
 
   return (
     <header
@@ -102,8 +113,14 @@ export function Navbar() {
             <img
               src={APP_LOGO_SRC}
               alt="LAI"
-              className="h-9 w-auto max-w-[180px] object-contain drop-shadow-[0_0_16px_rgba(143,200,230,0.28)] transition-transform duration-300 group-hover:scale-105"
+              className="h-9 w-auto max-w-[180px] object-contain drop-shadow-[0_0_16px_rgba(143,200,230,0.28)] transition-transform duration-300 group-hover:scale-105 group-hover:animate-spin-slow"
             />
+            <span
+              className="text-xl font-bold tracking-tight bg-clip-text text-transparent"
+              style={{ backgroundImage: "linear-gradient(90deg, oklch(0.78 0.07 235), oklch(0.72 0.11 220))" }}
+            >
+              LAI
+            </span>
           </Link>
         </div>
         
@@ -123,13 +140,7 @@ export function Navbar() {
                 ) : (
                   <Cpu className="h-3.5 w-3.5" />
                 )}
-                {gpuStatus?.has_gpu ? (
-                  <span className="hidden sm:inline">
-                    {formatMb(gpuStatus.memory_used_mb)} / {formatMb(gpuStatus.memory_total_mb)}
-                  </span>
-                ) : gpuStatus && !gpuStatus.has_gpu ? (
-                  <span className="hidden sm:inline text-muted-foreground">No GPU</span>
-                ) : null}
+                <span className="hidden sm:inline text-muted-foreground">{gpuStatusText}</span>
               </Button>
             </PopoverTrigger>
             <PopoverContent className="w-72 p-0" align="end">
@@ -139,8 +150,8 @@ export function Navbar() {
                   {gpuStatus?.has_gpu
                     ? `${gpuStatus.gpu_count} GPU${gpuStatus.gpu_count > 1 ? "s" : ""} · ${formatMb(gpuStatus.memory_used_mb)} / ${formatMb(gpuStatus.memory_total_mb)} used`
                     : gpuStatus?.status === "unknown"
-                      ? "GPU status unavailable"
-                      : "No GPU detected"}
+                      ? "Detecting GPU worker status"
+                      : (gpuStatus?.gpu_features_message || "No GPU detected")}
                 </p>
               </div>
               {gpuStatus?.gpus && gpuStatus.gpus.length > 0 && (

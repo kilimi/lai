@@ -23,7 +23,7 @@ import {
   AlertCircle, 
   X,
   Loader2,
-  ListTodo,
+  Activity,
   Layers,
   Brain,
   Copy,
@@ -106,7 +106,7 @@ export const TasksPopover = ({ projectId }: TasksPopoverProps) => {
       case 'insid3_propagate':
         return <Search className="w-4 h-4 text-amber-500" />;
       default:
-        return <ListTodo className="w-4 h-4 text-gray-500" />;
+        return <Activity className="w-4 h-4 text-gray-500" />;
     }
   };
 
@@ -356,7 +356,7 @@ export const TasksPopover = ({ projectId }: TasksPopoverProps) => {
                 {activeTaskCount > 0 ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
-                  <ListTodo className="h-4 w-4" />
+                  <Activity className="h-4 w-4" />
                 )}
                 {activeTaskCount > 0 && (
                   <span 
@@ -395,7 +395,7 @@ export const TasksPopover = ({ projectId }: TasksPopoverProps) => {
           <ScrollArea className="flex-1 min-h-0">
             {visibleTasks.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground">
-                <ListTodo className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                <Activity className="w-12 h-12 mx-auto mb-4 opacity-50" />
                 <p>No active or recent tasks</p>
               </div>
             ) : (

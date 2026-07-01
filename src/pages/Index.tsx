@@ -241,7 +241,7 @@ export default function Index() {
               <div className="flex items-center gap-2">
                 <img src={APP_LOGO_SRC} alt="LAI" className="h-8 w-8 object-contain" />
                 <div>
-                  <h2 className="text-sm font-semibold text-foreground">LAI Studio</h2>
+                  <h2 className="text-sm font-semibold text-foreground">LAI Vision</h2>
                   <p className="text-xs text-muted-foreground">Quick Access</p>
                 </div>
               </div>

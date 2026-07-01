@@ -92,10 +92,14 @@ export function ExportModelModal({
 
   const foundationModelName = `${foundationArch}${foundationSize}`;
 
-  // Filter to completed training tasks that produce exportable checkpoints.
-  const availableModels = trainingTasks.filter(
-    task => (task.task_type === 'yolo_training' || task.task_type === 'training') && task.status === 'completed'
-  );
+  // Allow completed tasks, plus stopped tasks when they have saved checkpoints.
+  const availableModels = trainingTasks.filter((task) => {
+    if (!(task.task_type === 'yolo_training' || task.task_type === 'training' || task.task_type === 'mmyolo_training')) {
+      return false;
+    }
+    const hasCheckpoint = !!(task?.task_metadata?.best_model || task?.task_metadata?.last_model);
+    return task.status === 'completed' || (task.status === 'stopped' && hasCheckpoint);
+  });
 
   const selectedTask = availableModels.find((task) => task.id.toString() === selectedModel);
 
@@ -328,7 +332,7 @@ export function ExportModelModal({
                       <SelectContent>
                         {availableModels.length === 0 ? (
                           <SelectItem value="no-models" disabled>
-                            No completed trained models available
+                            No exportable trained models available
                           </SelectItem>
                         ) : (
                           availableModels.map(task => (

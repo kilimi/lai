@@ -1746,7 +1746,7 @@ export class ApiClient {
     });
   }
 
-  async getGpuStatus(): Promise<ApiResponse<{
+  async getGpuStatus(debug: boolean = true): Promise<ApiResponse<{
     has_gpu: boolean;
     gpu_count: number;
     gpus: Array<{
@@ -1757,8 +1757,13 @@ export class ApiClient {
     }>;
     memory_used_mb: number;
     memory_total_mb: number;
+    source?: string;
+    status?: string;
+    gpu_tier_configured?: boolean;
+    gpu_features_message?: string | null;
   }>> {
-    return this.request('/system/gpu', { method: 'GET' });
+    const suffix = debug ? '?debug=1' : '';
+    return this.request(`/system/gpu${suffix}`, { method: 'GET' });
   }
 
   async getAppVersion(): Promise<ApiResponse<{ version: string }>> {

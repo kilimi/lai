@@ -112,6 +112,10 @@ export default {
         'pulse-subtle': {
           '0%, 100%': { opacity: '1' },
           '50%': { opacity: '0.8' }
+        },
+        'spin-slow': {
+          '0%': { transform: 'rotate(0deg)' },
+          '100%': { transform: 'rotate(360deg)' }
         }
       },
       animation: {
@@ -123,7 +127,8 @@ export default {
         'scale-out': 'scale-out 0.3s ease-out',
         'slide-in': 'slide-in 0.3s ease-out',
         'slide-out': 'slide-out 0.3s ease-out',
-        'pulse-subtle': 'pulse-subtle 2s infinite'
+        'pulse-subtle': 'pulse-subtle 2s infinite',
+        'spin-slow': 'spin-slow 1.5s linear infinite'
       },
       backdropFilter: {
         'none': 'none',

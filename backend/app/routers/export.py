@@ -107,13 +107,18 @@ async def start_yolo_export(
             if not training_task:
                 raise HTTPException(status_code=404, detail="Training task not found")
             
-            if training_task.status != 'completed':
-                raise HTTPException(
-                    status_code=400, 
-                    detail=f"Training task must be completed. Current status: {training_task.status}"
-                )
-            
             task_metadata = training_task.task_metadata or {}
+            has_saved_checkpoint = bool(task_metadata.get('best_model') or task_metadata.get('last_model'))
+            if training_task.status != 'completed' and not has_saved_checkpoint:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Training task is not exportable yet. "
+                        f"Current status: {training_task.status}. "
+                        "A saved best/last checkpoint is required."
+                    )
+                )
+
             model_path = None
             
             if request.checkpoint == "best":

@@ -119,7 +119,6 @@ export default function ProjectEvaluations() {
           buildApiUrl("/tasks/", {
             project_id: id,
             task_type: "yolo_training,training,mmyolo_training",
-            status: "completed",
             metadata_mode: "list",
             limit: "150",
           })

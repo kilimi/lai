@@ -245,10 +245,10 @@ export function TrainingDetailsModal({ open, onOpenChange, taskId }: TrainingDet
       .reverse()
       .find((m) => m.mAP50 != null || m.mAP50_95 != null);
 
-    const merged: TrainingMetrics = {
+    const merged = {
       ...(lastHist || {}),
       ...(raw || {}),
-    };
+    } as TrainingMetrics;
     if (lastVal) {
       if (lastVal.mAP50 != null) merged.mAP50 = lastVal.mAP50;
       if (lastVal.mAP50_95 != null) merged.mAP50_95 = lastVal.mAP50_95;

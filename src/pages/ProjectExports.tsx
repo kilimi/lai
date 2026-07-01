@@ -63,7 +63,7 @@ export default function ProjectExports() {
       // Two targeted requests instead of one "all tasks" dump
       const [trainingRes, exportRes] = await Promise.all([
         fetch(
-          `${base}/tasks/?project_id=${id}&task_type=yolo_training,training,mmyolo_training&status=completed&metadata_mode=list&limit=200`,
+          `${base}/tasks/?project_id=${id}&task_type=yolo_training,training,mmyolo_training&metadata_mode=list&limit=200`,
           { credentials: 'omit' },
         ),
         fetch(
