@@ -27,7 +27,7 @@ import {
 } from "@/lib/projects-list";
 import { cn } from "@/lib/utils";
 
-const APP_LOGO_SRC = "/lai-logo.svg";
+const APP_LOGO_SRC = "/lai_logo.png";
 
 interface QuickProjectItemProps {
   project: Project;

@@ -10,7 +10,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Progress } from "@/components/ui/progress";
 import { LAI_TUTORIALS_URL } from "@/constants/externalLinks";
 
-const APP_LOGO_SRC = "/lai-logo.svg";
+const APP_LOGO_SRC = "/lai_logo.png";
 
 type GpuStatus = {
   has_gpu: boolean;
@@ -102,11 +102,8 @@ export function Navbar() {
             <img
               src={APP_LOGO_SRC}
               alt="LAI"
-              className="h-9 w-9 object-contain drop-shadow-[0_0_16px_rgba(143,200,230,0.28)] transition-transform duration-300 group-hover:scale-105"
+              className="h-9 w-auto max-w-[180px] object-contain drop-shadow-[0_0_16px_rgba(143,200,230,0.28)] transition-transform duration-300 group-hover:scale-105"
             />
-            <span className="bg-gradient-to-r from-primary via-accent to-secondary bg-clip-text text-transparent group-hover:from-accent group-hover:via-primary group-hover:to-secondary transition-all duration-300">
-              LAI
-            </span>
           </Link>
         </div>
         
