@@ -9,6 +9,9 @@ from datetime import timedelta
 from kombu import Queue
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://redis:6379/0")
+BROKER_VISIBILITY_TIMEOUT = int(
+    os.environ.get("CELERY_BROKER_VISIBILITY_TIMEOUT", str(7 * 24 * 60 * 60))
+)
 
 GENERAL_INCLUDE = [
     "app.tasks.dataset_tasks",
@@ -117,6 +120,7 @@ def apply_common_config(app, *, enable_beat: bool = False) -> None:
         "task_queues": TASK_QUEUES,
         "task_routes": TASK_ROUTES,
         "result_expires": 3600 * 24,
+        "broker_transport_options": {"visibility_timeout": BROKER_VISIBILITY_TIMEOUT},
         "result_backend_transport_options": {"master_name": "mymaster"},
         "task_acks_late": True,
         "task_reject_on_worker_lost": True,

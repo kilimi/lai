@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useLocation, Link } from "react-router-dom";
-import { Plus, Search, Settings, Activity, Tag, Filter, Sparkles, RefreshCw, FolderOpen, ChevronRight, FolderPlus, Image as ImageIcon, Brain, BookOpen, Rocket, ArrowRight } from "lucide-react";
+import { Plus, Search, Settings, Activity, Tag, Filter, RefreshCw, FolderOpen, ChevronRight, FolderPlus, Image as ImageIcon, Brain, BookOpen, ArrowRight } from "lucide-react";
 import { LAI_TUTORIALS_URL } from "@/constants/externalLinks";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,6 +26,8 @@ import {
   type ProjectSortOrder,
 } from "@/lib/projects-list";
 import { cn } from "@/lib/utils";
+
+const APP_LOGO_SRC = "/lai-logo.svg";
 
 interface QuickProjectItemProps {
   project: Project;
@@ -84,9 +86,7 @@ function EmptyOnboarding() {
       <Card className="glass-card p-10 text-center relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-accent/5 pointer-events-none" />
         <div className="relative">
-          <div className="w-16 h-16 mx-auto mb-5 rounded-2xl bg-primary/10 flex items-center justify-center">
-            <Rocket className="w-8 h-8 text-primary" />
-          </div>
+          <img src={APP_LOGO_SRC} alt="LAI" className="h-20 w-20 mx-auto mb-5 object-contain" />
           <h3 className="text-2xl font-semibold mb-2">Welcome to LAI Studio</h3>
           <p className="text-muted-foreground max-w-lg mx-auto mb-6">
             You don't have any projects yet. Follow these three steps to go from raw images to a trained model.
@@ -239,9 +239,7 @@ export default function Index() {
           <div className="p-4 h-full flex flex-col">
             <div className="mb-4 pb-4 border-b border-border/50">
               <div className="flex items-center gap-2">
-                <div className="h-8 w-8 rounded-lg bg-primary/20 flex items-center justify-center">
-                  <Sparkles className="h-4 w-4 text-primary" />
-                </div>
+                <img src={APP_LOGO_SRC} alt="LAI" className="h-8 w-8 object-contain" />
                 <div>
                   <h2 className="text-sm font-semibold text-foreground">LAI Studio</h2>
                   <p className="text-xs text-muted-foreground">Quick Access</p>

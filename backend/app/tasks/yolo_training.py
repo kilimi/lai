@@ -68,6 +68,7 @@ class YOLOTrainingTask(TrainingTask):
         self.model_path: Optional[str] = None
         self.model_class: str = "yolo"
         self._last_train_args: Optional[Dict[str, Any]] = None
+        self.interrupted_status: Optional[str] = None
     
     def execute(self, task_id: int, training_config: Dict[str, Any]):
         """
@@ -120,6 +121,15 @@ class YOLOTrainingTask(TrainingTask):
             logger.info(f"About to call model.train() with args: {list(train_args.keys())}")
             self._train_model(train_args)
             logger.info(f"Model training completed for task {task_id}")
+
+            if self.interrupted_status in {"stopped", "paused"}:
+                self._persist_interrupted_artifacts()
+                return {
+                    "status": self.interrupted_status,
+                    "task_id": task_id,
+                    "best_model": (self.task.task_metadata or {}).get("best_model") if self.task else None,
+                    "last_model": (self.task.task_metadata or {}).get("last_model") if self.task else None,
+                }
             
             # Handle weights
             logger.info(f"Step 7: Handling weights for task {task_id}")
@@ -419,6 +429,36 @@ class YOLOTrainingTask(TrainingTask):
                     logger.warning(f"Could not fix permissions after training: {e}")
         finally:
             os.umask(old_umask)
+
+    def _runtime_save_dir(self) -> Optional[Path]:
+        if not self._last_train_args:
+            return None
+        project = self._last_train_args.get("project")
+        name = self._last_train_args.get("name", "training")
+        if not project:
+            return None
+        return Path(str(project)) / str(name)
+
+    def _persist_interrupted_artifacts(self):
+        if not self.task or not self.output_base or not self.weights_dir:
+            return
+        from sqlalchemy.orm.attributes import flag_modified
+        from app.tasks.yolo_training_helpers import copy_weights_to_expected_location, sync_training_run_artifacts
+
+        actual_save_dir = self._runtime_save_dir()
+        weights_info = copy_weights_to_expected_location(actual_save_dir, self.weights_dir, self.output_base)
+        artifact_info = sync_training_run_artifacts(actual_save_dir, self.output_base / "training")
+        updated_meta = {
+            **(self.task.task_metadata or {}),
+            **weights_info,
+            **artifact_info,
+            "results_dir": str(self.output_base / "training"),
+        }
+        if weights_info.get("last_model") and not updated_meta.get("resume_from"):
+            updated_meta["resume_from"] = weights_info["last_model"]
+        self.task.task_metadata = updated_meta
+        flag_modified(self.task, "task_metadata")
+        self.db.commit()
     
     def _handle_weights(self):
         """Handle weight files after training"""
@@ -596,6 +636,7 @@ class YOLOTrainingTask(TrainingTask):
                     }
                     self.db.commit()
                 logger.info(f"Task {self.task_id} stop/pause detected, not overwriting to 'failed'")
+                self._persist_interrupted_artifacts()
                 # Still try to record checkpoint paths if the epoch callback didn't get a chance
                 self._save_checkpoint_paths_to_metadata()
                 return
@@ -607,6 +648,7 @@ class YOLOTrainingTask(TrainingTask):
                 "stage": "failed",
                 "error": str(error)
             }
+            self._persist_interrupted_artifacts()
             # Even on failure, record any checkpoints that were saved
             self._save_checkpoint_paths_to_metadata()
             self.db.commit()

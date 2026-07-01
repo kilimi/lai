@@ -714,8 +714,10 @@ async def rerun_task(task_id: int, db: Session = Depends(get_db)):
     
     # Validate training task exists
     training_task = db.query(models.Task).filter(models.Task.id == training_task_id).first()
-    if not training_task or training_task.status != 'completed':
-        raise HTTPException(status_code=404, detail="Training task not found or not completed")
+    training_meta = (training_task.task_metadata or {}) if training_task else {}
+    has_saved_checkpoint = bool(training_meta.get('best_model') or training_meta.get('last_model'))
+    if not training_task or (training_task.status != 'completed' and not has_saved_checkpoint):
+        raise HTTPException(status_code=404, detail="Training task not found or has no saved checkpoint")
     
     # Validate dataset exists
     dataset = db.query(models.Dataset).filter(models.Dataset.id == dataset_id).first()

@@ -1,7 +1,7 @@
 import { Link, useLocation, useParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { Settings, Sparkles, Sun, Moon, Cpu, Loader2, BookOpen } from "lucide-react";
+import { Settings, Sun, Moon, Cpu, Loader2, BookOpen } from "lucide-react";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { TasksPopover } from "./TasksPopover";
 import { useTheme } from "./ThemeProvider";
@@ -9,6 +9,8 @@ import { useApi } from "@/hooks/use-api";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Progress } from "@/components/ui/progress";
 import { LAI_TUTORIALS_URL } from "@/constants/externalLinks";
+
+const APP_LOGO_SRC = "/lai-logo.svg";
 
 type GpuStatus = {
   has_gpu: boolean;
@@ -97,10 +99,11 @@ export function Navbar() {
             to="/" 
             className="flex items-center gap-3 text-xl font-bold tracking-tight group"
           >
-            <div className="relative">
-              <Sparkles className="w-6 h-6 text-primary animate-pulse-soft group-hover:animate-spin transition-all duration-300" />
-              <div className="absolute inset-0 bg-primary/20 blur-xl rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-            </div>
+            <img
+              src={APP_LOGO_SRC}
+              alt="LAI"
+              className="h-9 w-9 object-contain drop-shadow-[0_0_16px_rgba(143,200,230,0.28)] transition-transform duration-300 group-hover:scale-105"
+            />
             <span className="bg-gradient-to-r from-primary via-accent to-secondary bg-clip-text text-transparent group-hover:from-accent group-hover:via-primary group-hover:to-secondary transition-all duration-300">
               LAI
             </span>

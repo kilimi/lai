@@ -708,8 +708,10 @@ async def evaluate_model(
     try:
         # Validate training task exists
         training_task = db.query(Task).filter(Task.id == request.task_id).first()
-        if not training_task or training_task.status != 'completed':
-            raise HTTPException(status_code=404, detail="Training task not found or not completed")
+        training_meta = (training_task.task_metadata or {}) if training_task else {}
+        has_saved_checkpoint = bool(training_meta.get('best_model') or training_meta.get('last_model'))
+        if not training_task or (training_task.status != 'completed' and not has_saved_checkpoint):
+            raise HTTPException(status_code=404, detail="Training task not found or has no saved checkpoint")
         
         # Validate dataset exists
         dataset = db.query(Dataset).filter(Dataset.id == request.dataset_id).first()
@@ -727,7 +729,7 @@ async def evaluate_model(
             selected_collection_name = selected_collection.name
         
         # Get model info from training task
-        task_metadata = training_task.task_metadata or {}
+        task_metadata = training_meta
         model_type = task_metadata.get('model_type', 'Unknown')
         from app.ml.dispatch import framework_label_for_task
 
@@ -831,14 +833,16 @@ async def evaluate_model_multiple_datasets(
     try:
         # Validate training task exists
         training_task = db.query(Task).filter(Task.id == request.task_id).first()
-        if not training_task or training_task.status != 'completed':
-            raise HTTPException(status_code=404, detail="Training task not found or not completed")
+        training_meta = (training_task.task_metadata or {}) if training_task else {}
+        has_saved_checkpoint = bool(training_meta.get('best_model') or training_meta.get('last_model'))
+        if not training_task or (training_task.status != 'completed' and not has_saved_checkpoint):
+            raise HTTPException(status_code=404, detail="Training task not found or has no saved checkpoint")
         
         if not request.datasets or len(request.datasets) == 0:
             raise HTTPException(status_code=400, detail="At least one dataset is required")
         
         # Get model info from training task
-        task_metadata = training_task.task_metadata or {}
+        task_metadata = training_meta
         model_type = task_metadata.get('model_type', 'Unknown')
         from app.ml.dispatch import framework_label_for_task
 

@@ -259,6 +259,21 @@ def _mark_task_failed(db, task_id: int, exc: Exception) -> None:
     db.commit()
 
 
+def _persist_mmyolo_interrupt_artifacts(db, task: TaskModel, output_base: Path) -> None:
+    best_model = _find_best_model(output_base / "training")
+    last_model_path = output_base / "training" / "epoch_last.pth"
+    if not last_model_path.exists() and best_model:
+        last_model_path = Path(best_model)
+    task.task_metadata = {
+        **(task.task_metadata or {}),
+        "best_model": best_model,
+        "last_model": str(last_model_path) if last_model_path.exists() else best_model,
+        "resume_from": str(last_model_path) if last_model_path.exists() else best_model,
+        "results_dir": str(output_base / "training"),
+    }
+    db.commit()
+
+
 @celery_app.task(
     base=TrainingTask,
     bind=True,
@@ -458,6 +473,12 @@ def train_mmyolo_model(self, task_id: int, training_config: Dict[str, Any]):
         epoch_log = _stream_training_output(process, db, task, task_id, epochs)
         process.wait()
 
+        task = db.query(TaskModel).filter(TaskModel.id == task_id).first()
+        if task and task.status in ("paused", "stopped"):
+            _persist_mmyolo_interrupt_artifacts(db, task, output_base)
+            logger.info(f"MMYOLO task {task_id} interrupted with status='{task.status}'")
+            return {"status": task.status, "task_id": task_id}
+
         if process.returncode != 0:
             error_tail = "\n".join(epoch_log[-30:])
             raise RuntimeError(
@@ -510,6 +531,9 @@ def train_mmyolo_model(self, task_id: int, training_config: Dict[str, Any]):
 
     except Exception as exc:
         logger.error(f"Error in MMYOLO training task {task_id}: {exc}", exc_info=True)
+        task = db.query(TaskModel).filter(TaskModel.id == task_id).first()
+        if task and task.status in ("paused", "stopped"):
+            _persist_mmyolo_interrupt_artifacts(db, task, _task_output_base(training_config["project_id"], task_id))
         _mark_task_failed(db, task_id, exc)
         raise
     finally:

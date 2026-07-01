@@ -14,6 +14,28 @@ from app.tasks.training_common import TrainingTask
 logger = logging.getLogger(__name__)
 
 
+def _persist_rtdetr_artifacts(task: TaskModel, output_base: Path, train_args: Dict[str, Any], db) -> None:
+    from sqlalchemy.orm.attributes import flag_modified
+    from app.tasks.yolo_training_helpers import copy_weights_to_expected_location, sync_training_run_artifacts
+
+    persisted_weights_dir = output_base / "training" / "weights"
+    persisted_weights_dir.mkdir(parents=True, exist_ok=True)
+    runtime_save_dir = Path(str(train_args.get("project", ""))) / str(train_args.get("name", "training"))
+    weights_info = copy_weights_to_expected_location(runtime_save_dir, persisted_weights_dir, output_base)
+    artifact_info = sync_training_run_artifacts(runtime_save_dir, output_base / "training")
+    updated_meta = {
+        **(task.task_metadata or {}),
+        **weights_info,
+        **artifact_info,
+        "results_dir": str(output_base / "training"),
+    }
+    if weights_info.get("last_model") and not updated_meta.get("resume_from"):
+        updated_meta["resume_from"] = weights_info["last_model"]
+    task.task_metadata = updated_meta
+    flag_modified(task, "task_metadata")
+    db.commit()
+
+
 @celery_app.task(base=TrainingTask, bind=True, name="app.tasks.training_tasks.train_rtdetr_model")
 def train_rtdetr_model(self, task_id: int, training_config: Dict[str, Any]):
     """Train RT-DETR (Real-Time Detection Transformer) model."""
@@ -21,6 +43,8 @@ def train_rtdetr_model(self, task_id: int, training_config: Dict[str, Any]):
     from app.tasks.yolo_training_helpers import get_runtime_training_project
 
     db = SessionLocal()
+    output_base = Path(training_config["output_dir"])
+    train_args: Dict[str, Any] | None = None
 
     def _create_rtdetr_training_examples(task: TaskModel) -> None:
         try:
@@ -161,35 +185,13 @@ def train_rtdetr_model(self, task_id: int, training_config: Dict[str, Any]):
             return {"status": "completed", "task_id": task_id}
 
         if task.status in ("paused", "stopped"):
+            _persist_rtdetr_artifacts(task, output_base, train_args, db)
             logger.info(f"RT-DETR task {task_id} finished training loop with status='{task.status}'")
             return {"status": task.status, "task_id": task_id}
 
         logger.info(f"RT-DETR training completed for task {task_id}")
 
-        output_base = Path(training_config["output_dir"])
-        persisted_weights_dir = output_base / "training" / "weights"
-        persisted_weights_dir.mkdir(parents=True, exist_ok=True)
-        try:
-            os.chmod(persisted_weights_dir, 0o777)
-        except OSError:
-            pass
-
-        runtime_save_dir = Path(train_args.get("project", "")) / train_args.get("name", "training")
-        if not runtime_save_dir.exists():
-            runtime_save_dir = None
-
-        if runtime_save_dir and runtime_save_dir.exists():
-            runtime_weights_dir = runtime_save_dir / "weights"
-            for name in ("best.pt", "last.pt"):
-                src = runtime_weights_dir / name
-                dst = persisted_weights_dir / name
-                if src.exists():
-                    try:
-                        shutil.copy2(src, dst)
-                        os.chmod(dst, 0o666)
-                        logger.info(f"RT-DETR copied {name} from {src} to {dst}")
-                    except Exception as copy_err:
-                        logger.warning(f"RT-DETR could not copy {name}: {copy_err}")
+        _persist_rtdetr_artifacts(task, output_base, train_args, db)
 
         best_model_path = output_base / "training" / "weights" / "best.pt"
         last_model_path = output_base / "training" / "weights" / "last.pt"
@@ -220,6 +222,8 @@ def train_rtdetr_model(self, task_id: int, training_config: Dict[str, Any]):
             pause_requested = isinstance(task_meta, dict) and bool(task_meta.get("pause_requested_at"))
             stop_requested = isinstance(task_meta, dict) and bool(task_meta.get("stop_requested_at"))
             if task.status in ("paused", "stopped") or pause_requested or stop_requested:
+                if train_args is not None:
+                    _persist_rtdetr_artifacts(task, output_base, train_args, db)
                 if pause_requested and task.status != "paused":
                     task.status = "paused"
                     task.task_metadata = {**task_meta, "stage": "paused", "pause_requested_at": None}

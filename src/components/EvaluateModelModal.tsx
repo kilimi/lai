@@ -334,9 +334,10 @@ export function EvaluateModelModal({
 
   const evaluationCandidateTasks = useMemo(
     () => trainingTasks.filter((task) => {
-      if (task.status !== 'completed') return false;
+      const hasCheckpoint = !!(task.task_metadata?.best_model || task.task_metadata?.last_model);
+      if (task.status !== 'completed' && !(task.status === 'stopped' && hasCheckpoint)) return false;
       if (task.task_type === 'yolo_training') return true;
-      return !!(task.task_metadata?.best_model || task.task_metadata?.last_model);
+      return hasCheckpoint;
     }),
     [trainingTasks]
   );

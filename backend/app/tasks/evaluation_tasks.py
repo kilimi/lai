@@ -365,8 +365,10 @@ def evaluate_model(
         YOLO = get_ultralytics_yolo()
         # Get the training task
         training_task = db.query(TaskModel).filter(TaskModel.id == training_task_id).first()
-        if not training_task or training_task.status != 'completed':
-            raise ValueError("Training task not found or not completed")
+        training_meta = (training_task.task_metadata or {}) if training_task else {}
+        has_saved_checkpoint = bool(training_meta.get('best_model') or training_meta.get('last_model'))
+        if not training_task or (training_task.status != 'completed' and not has_saved_checkpoint):
+            raise ValueError("Training task not found or has no saved checkpoint")
 
         from app.ml.dispatch import get_model_backend
 
@@ -395,7 +397,7 @@ def evaluate_model(
             )
         
         # Get model path from training task metadata
-        task_metadata = training_task.task_metadata or {}
+        task_metadata = training_meta
         model_path = None
         
         if checkpoint == "best":

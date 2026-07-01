@@ -114,6 +114,7 @@ def run_ultralytics_training_subprocess(
 
         current_epoch = 0
         output_log: List[str] = []
+        setattr(task_runner, "interrupted_status", None)
 
         for line in process.stdout or []:
             output_log.append(line)
@@ -126,6 +127,7 @@ def run_ultralytics_training_subprocess(
             task_meta = task.task_metadata or {}
             if task_meta.get("stop_requested_at"):
                 process.terminate()
+                setattr(task_runner, "interrupted_status", "stopped")
                 task.status = "stopped"
                 task.completed_at = datetime.utcnow()
                 task.task_metadata = {**task_meta, "stage": "stopped"}
@@ -133,6 +135,7 @@ def run_ultralytics_training_subprocess(
                 break
             if task_meta.get("pause_requested_at"):
                 process.terminate()
+                setattr(task_runner, "interrupted_status", "paused")
                 task.status = "paused"
                 task.task_metadata = {
                     **task_meta,
@@ -218,6 +221,8 @@ def run_ultralytics_training_subprocess(
                 db.commit()
 
         return_code = process.wait()
+        if getattr(task_runner, "interrupted_status", None) in {"stopped", "paused"}:
+            return
         if return_code != 0:
             error_tail = "\n".join(output_log[-30:]).strip()
             detail = f"\n{error_tail}" if error_tail else ""
