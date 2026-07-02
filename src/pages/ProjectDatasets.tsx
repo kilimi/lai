@@ -351,6 +351,7 @@ export default function ProjectDatasets() {
   };
 
   const handleGroupUpdated = () => {
+    fetchProjectDatasets();
     fetchDatasetGroups();
     setShowEditGroupModal(false);
     setEditingGroup(null);

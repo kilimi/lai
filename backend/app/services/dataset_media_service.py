@@ -49,14 +49,18 @@ def truncate_base64_url(url: str | None, include_base64: bool = False) -> str | 
 def set_random_image_as_logo(
     dataset: models.Dataset, db: Session, base_url: str = ""
 ) -> None:
-    """Set a random dataset image as logo/thumbnail when none is configured."""
+    """Set a dataset image as logo/thumbnail when none is configured.
+
+    We use the first available image instead of a random one because ORDER BY random()
+    forces a full scan/sort and is unnecessary for a thumbnail fallback.
+    """
     if dataset.thumbnailUrl or dataset.logo_url or dataset.logo:
         return
 
     random_image = (
         db.query(models.Image)
         .filter(models.Image.dataset_id == dataset.id, models.Image.url.isnot(None))
-        .order_by(func.random())
+        .order_by(models.Image.id.asc())
         .first()
     )
     if not random_image or not random_image.url:

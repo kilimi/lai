@@ -11,7 +11,7 @@ mmyolo-build.log
 backend/backups/
 node_modules
 bun.lock
-
+performances/
 # Foreign / local clones (not part of LAI)
 geti/
 

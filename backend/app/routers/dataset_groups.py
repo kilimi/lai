@@ -373,23 +373,23 @@ async def update_dataset_group(
                 dataset_id_list = []
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid dataset ID format")
-        
+
         if not dataset_id_list:
-            raise HTTPException(status_code=400, detail="At least one dataset must be selected")
-        
-        # Verify all datasets exist and belong to the same project
-        datasets = db.query(models.Dataset).filter(
-            models.Dataset.id.in_(dataset_id_list),
-            models.Dataset.project_id == group.project_id
-        ).all()
-        
-        # Filter to only existing datasets (ignore deleted ones)
-        existing_dataset_ids = [d.id for d in datasets]
-        if not existing_dataset_ids:
-            raise HTTPException(status_code=400, detail="At least one valid dataset must be selected")
-        
-        # Use only the existing dataset IDs
-        group.datasets_list = existing_dataset_ids
+            group.datasets_list = []
+        else:
+            # Verify all datasets exist and belong to the same project
+            datasets = db.query(models.Dataset).filter(
+                models.Dataset.id.in_(dataset_id_list),
+                models.Dataset.project_id == group.project_id
+            ).all()
+
+            # Filter to only existing datasets (ignore deleted ones)
+            existing_dataset_ids = [d.id for d in datasets]
+            if not existing_dataset_ids:
+                raise HTTPException(status_code=400, detail="At least one valid dataset must be selected")
+
+            # Use only the existing dataset IDs
+            group.datasets_list = existing_dataset_ids
     
     db.commit()
     db.refresh(group)

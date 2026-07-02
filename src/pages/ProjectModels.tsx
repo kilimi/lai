@@ -107,6 +107,7 @@ export default function ProjectModels() {
   const [testInference, setTestInference] = useState<{ id: number; name: string } | null>(null);
   const [trainModalCloneTaskId, setTrainModalCloneTaskId] = useState<number | null>(null);
   const [pendingDeleteTask, setPendingDeleteTask] = useState<any | null>(null);
+  const [deletingTaskId, setDeletingTaskId] = useState<number | null>(null);
   const [pendingStopTask, setPendingStopTask] = useState<any | null>(null);
   const [showDeleteFailedConfirm, setShowDeleteFailedConfirm] = useState(false);
   const [showDeleteAllConfirm, setShowDeleteAllConfirm] = useState(false);
@@ -312,6 +313,7 @@ export default function ProjectModels() {
   };
 
   const performDeleteTask = async (task: any) => {
+    setDeletingTaskId(task.id);
     try {
       const response = await fetch(buildApiUrl(`/tasks/${task.id}`), { method: 'DELETE' });
       if (response.ok) {
@@ -324,6 +326,7 @@ export default function ProjectModels() {
     } catch (error) {
       toast({ title: "Error", description: error instanceof Error ? error.message : "Failed to delete training task", variant: "destructive" });
     } finally {
+      setDeletingTaskId(null);
       setPendingDeleteTask(null);
     }
   };
@@ -741,6 +744,7 @@ export default function ProjectModels() {
         itemName={pendingDeleteTask?.name}
         consequences={["All model files and checkpoints for this task will be removed."]}
         confirmLabel="Delete model"
+        isLoading={deletingTaskId === pendingDeleteTask?.id}
         onConfirm={() => pendingDeleteTask && performDeleteTask(pendingDeleteTask)}
       />
 

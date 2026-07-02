@@ -70,10 +70,6 @@ export function EditGroupModal({
       toast({ title: "Error", description: "Group name is required", variant: "destructive" });
       return;
     }
-    if (selectedDatasets.length === 0) {
-      toast({ title: "Error", description: "Please select at least one dataset", variant: "destructive" });
-      return;
-    }
 
     setIsLoading(true);
     try {
@@ -117,7 +113,7 @@ export function EditGroupModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
+      <DialogContent className="w-[min(96vw,1500px)] max-w-none max-h-[90vh] flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Edit className="h-5 w-5" />
@@ -179,7 +175,7 @@ export function EditGroupModal({
           </Button>
           <Button
             onClick={handleSubmit}
-            disabled={isLoading || !name.trim() || selectedDatasets.length === 0}
+            disabled={isLoading || !name.trim()}
           >
             {isLoading ? "Updating..." : "Update Group"}
           </Button>
