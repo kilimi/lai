@@ -18,9 +18,18 @@ export interface Task {
   task_metadata?: any;
 }
 
-export function useTasks(projectId?: number) {
+interface UseTasksOptions {
+  taskType?: string;
+  limit?: number;
+  recentHours?: number;
+}
+
+export function useTasks(projectId?: number, options?: UseTasksOptions) {
   const { api, isConfigured } = useApi();
   const { isExporting } = useExport();
+  const taskType = options?.taskType;
+  const limit = options?.limit ?? 100;
+  const recentHours = options?.recentHours ?? 1;
   const [tasks, setTasks] = useState<Task[]>([]);
   const [activeTasks, setActiveTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(false);
@@ -52,8 +61,9 @@ export function useTasks(projectId?: number) {
       setError(null);
       const response = await api.getTasks({
         project_id: projectId,
-        limit: 100,
-        recent_hours: 1,
+        task_type: taskType,
+        limit,
+        recent_hours: recentHours,
       });
       if (!mountedRef.current) return;
       if (response.success) {
@@ -70,7 +80,7 @@ export function useTasks(projectId?: number) {
     } finally {
       if (mountedRef.current) setLoading(false);
     }
-  }, [api, isConfigured, projectId]);
+  }, [api, isConfigured, projectId, taskType, limit, recentHours]);
 
   const cancelTask = async (taskId: number) => {
     if (!api || !isConfigured) return false;
@@ -106,7 +116,7 @@ export function useTasks(projectId?: number) {
     fetchActiveTasks();
     fetchAllTasks();
     return () => { mountedRef.current = false; };
-  }, [api, isConfigured, projectId]);
+  }, [api, isConfigured, projectId, fetchActiveTasks, fetchAllTasks]);
 
   // Poll only when visible (popover open) OR there are active tasks
   useEffect(() => {
@@ -122,7 +132,7 @@ export function useTasks(projectId?: number) {
     }, polling ? 5_000 : 10_000);
 
     return () => clearInterval(interval);
-  }, [api, isConfigured, projectId, isExporting, polling, activeTasks.length]);
+  }, [api, isConfigured, projectId, isExporting, polling, activeTasks.length, fetchActiveTasks, fetchAllTasks]);
 
   return {
     tasks,

@@ -27,7 +27,13 @@ _LIST_METADATA_RESULT_KEYS_DROP = frozenset(
 
 # Top-level task_metadata keys that can be very large (e.g. full COCO JSON stored inline).
 _LIST_METADATA_TOP_KEYS_DROP = frozenset(
-    {'coco_data', 'annotations_data', 'images_data'}
+    {
+        'coco_data',
+        'annotations_data',
+        'images_data',
+        # insid3 propagation can stash large reference payloads in this key.
+        'references',
+    }
 )
 
 

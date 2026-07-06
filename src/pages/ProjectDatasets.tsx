@@ -65,7 +65,11 @@ export default function ProjectDatasets() {
   const { project, refreshProject } = useOutletContext<OutletContext>();
   const { api } = useApi();
   const { toast } = useToast();
-  const { tasks } = useTasks(id ? parseInt(id) : undefined);
+  const { tasks } = useTasks(id ? parseInt(id) : undefined, {
+    taskType: 'augmentation',
+    limit: 30,
+    recentHours: 2,
+  });
   
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -100,7 +104,7 @@ export default function ProjectDatasets() {
       const response = await fetch(
         // Omit data: URLs from list JSON — server returns ?thumb=300 file previews instead (faster, smaller).
         `${getApiBaseUrl()}/projects/${id}/datasets/list?include_thumbnails=false`,
-        { credentials: 'omit' },
+        { credentials: 'omit', cache: 'no-store' },
       );
       if (response.ok) {
         const result = await response.json();
@@ -120,7 +124,10 @@ export default function ProjectDatasets() {
     if (!id) return;
     
     try {
-      const response = await fetch(`${getApiBaseUrl()}/projects/${id}/dataset-groups/`, { credentials: 'omit' });
+      const response = await fetch(
+        `${getApiBaseUrl()}/projects/${id}/dataset-groups/`,
+        { credentials: 'omit', cache: 'no-store' },
+      );
       if (response.ok) {
         const result = await response.json();
         if (result.success) {
@@ -166,7 +173,17 @@ export default function ProjectDatasets() {
   const getUngroupedDatasets = () => {
     const groupedDatasetIds = new Set<number>();
     datasetGroups.forEach(group => {
-      group.datasets.forEach(dataset => {
+      // `dataset_ids` is the source of truth for membership; `datasets` can be stale/incomplete.
+      if (Array.isArray(group.dataset_ids) && group.dataset_ids.length > 0) {
+        group.dataset_ids.forEach((datasetId) => {
+          if (Number.isFinite(datasetId)) {
+            groupedDatasetIds.add(datasetId);
+          }
+        });
+        return;
+      }
+
+      group.datasets.forEach((dataset) => {
         groupedDatasetIds.add(dataset.id);
       });
     });
@@ -382,6 +399,7 @@ export default function ProjectDatasets() {
         });
         setShowDeleteGroupConfirm(false);
         setGroupToDelete(null);
+        fetchProjectDatasets();
         fetchDatasetGroups();
       } else {
         let detail = 'Failed to delete group';

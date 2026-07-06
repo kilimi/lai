@@ -125,7 +125,7 @@ export function Navbar() {
         </div>
         
         <div className="flex items-center gap-2">
-          <TasksPopover />
+          <TasksPopover projectId={projectIdNum} />
 
           <Popover open={gpuPopoverOpen} onOpenChange={setGpuPopoverOpen}>
             <PopoverTrigger asChild>
