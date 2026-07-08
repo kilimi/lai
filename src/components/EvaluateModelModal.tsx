@@ -580,7 +580,7 @@ export function EvaluateModelModal({
                   modelClasses={modelClasses}
                   modelTaskType={modelTaskType}
                   pickerMode="evaluate"
-                  requireAnnotationSelection={false}
+                  requireAnnotationSelection={true}
                   value={pickerValue}
                   onChange={handlePickerChange}
                 />
