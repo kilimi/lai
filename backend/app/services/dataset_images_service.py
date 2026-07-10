@@ -59,7 +59,7 @@ async def upload_dataset_images(db: Session, dataset_id: int, files: List[Upload
             if not (is_image_mime or is_tiff_file):
                 continue
             
-            # Get or create default collection for this dataset (we need it for naming)
+            # Get or create default collection for this dataset.
             default_collection = db.query(models.ImageCollection).filter(
                 models.ImageCollection.dataset_id == dataset_id,
                 models.ImageCollection.is_default == True
@@ -76,21 +76,16 @@ async def upload_dataset_images(db: Session, dataset_id: int, files: List[Upload
                 db.add(default_collection)
                 db.flush()  # Get the ID without committing the full transaction
             
-            # Check if file already exists on disk (across all collections) and generate unique filename
+            # Check if file already exists on disk (across all collections) and generate unique filename.
+            # Never append collection name to filenames; keep only numeric conflict suffixes.
             original_path = dataset_dir / clean_filename
             final_filename = clean_filename
             counter = 1
             
-            # Generate unique filename if file already exists on disk
-            # Include collection name for better identification
+            # Generate unique filename if file already exists on disk.
             while original_path.exists():
                 name, ext = os.path.splitext(clean_filename)
-                if counter == 1:
-                    # First conflict: use collection name
-                    final_filename = f"{name}_{default_collection.name.replace(' ', '_')}{ext}"
-                else:
-                    # Subsequent conflicts: use collection name + number
-                    final_filename = f"{name}_{default_collection.name.replace(' ', '_')}_{counter}{ext}"
+                final_filename = f"{name}_{counter}{ext}"
                 original_path = dataset_dir / final_filename
                 counter += 1
             
