@@ -93,9 +93,15 @@ def _is_rotated_arch(arch: str) -> bool:
     return (arch or "").strip() == "rtmdet-r"
 
 
+def _uses_head_module(arch: str) -> bool:
+    """Whether bbox_head.num_classes lives under head_module for this arch."""
+    return (arch or "").strip() in {"yolov8", "rtmdet", "rtmdet-r"}
+
+
 def build_model_override(
     num_classes: int,
     *,
+    arch: str,
     is_dji_mode: bool,
     dji_use_widen_factor_025: bool,
 ) -> str:
@@ -129,18 +135,29 @@ model = dict(
 )
 """
 
-    comment = (
-        "# DJI mode without widen_factor override (default YOLOv8-S widen_factor=0.5)"
-        if is_dji_mode
-        else "# Override num_classes in model head and assigner (base COCO config uses 80)"
-    )
-    return f"""
+    if _uses_head_module(arch):
+        comment = (
+            "# DJI mode without widen_factor override (default YOLOv8-S widen_factor=0.5)"
+            if is_dji_mode
+            else "# Override num_classes in model head and assigner (base COCO config uses 80)"
+        )
+        return f"""
 {comment}
 model = dict(
     bbox_head=dict(
         head_module=dict(
             num_classes={num_classes},
         ),
+    ),
+{assigner_override}
+)
+"""
+
+    return f"""
+# Override num_classes for MMDetection-style RTMDet heads (no head_module key).
+model = dict(
+    bbox_head=dict(
+        num_classes={num_classes},
     ),
 {assigner_override}
 )
@@ -327,6 +344,7 @@ def build_mmyolo_config_content(params: MMYOLOConfigParams) -> str:
     is_rotated = _is_rotated_arch(params.arch)
     model_override = build_model_override(
         params.num_classes,
+        arch=params.arch,
         is_dji_mode=params.is_dji_mode,
         dji_use_widen_factor_025=params.dji_use_widen_factor_025,
     )

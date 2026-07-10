@@ -142,6 +142,19 @@ def test_generated_config_rtmdet_r_includes_mmrotate_and_coco_oriented_pipelines
     assert "type='mmdet.CocoMetric'" not in content
 
 
+def test_generated_config_rtmdet_ins_sets_bbox_head_num_classes_directly():
+    content = build_mmyolo_config_content(
+        _sample_params(
+            arch="rtmdet-ins",
+            base_cfg="rtmdet-ins_s_8xb32-300e_coco.py",
+            is_dji_mode=False,
+        )
+    )
+    assert "bbox_head=dict(" in content
+    assert "num_classes=2" in content
+    assert "head_module=dict(" not in content
+
+
 def test_generated_config_skips_pretrained_for_dji_widen_025():
     content = build_mmyolo_config_content(
         _sample_params(
