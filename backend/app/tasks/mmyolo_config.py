@@ -98,6 +98,11 @@ def _uses_head_module(arch: str) -> bool:
     return (arch or "").strip() in {"yolov8", "rtmdet", "rtmdet-r"}
 
 
+def _uses_assigner_num_classes(arch: str) -> bool:
+    """Whether train_cfg.assigner accepts num_classes for this arch."""
+    return (arch or "").strip() == "yolov8"
+
+
 def build_model_override(
     num_classes: int,
     *,
@@ -106,7 +111,9 @@ def build_model_override(
     dji_use_widen_factor_025: bool,
 ) -> str:
     """Build the model override block for generated MMYOLO configs."""
-    assigner_override = f"""    train_cfg=dict(
+    assigner_override = ""
+    if _uses_assigner_num_classes(arch):
+        assigner_override = f"""    train_cfg=dict(
         assigner=dict(
             num_classes={num_classes},
         ),

@@ -153,6 +153,31 @@ def test_generated_config_rtmdet_ins_sets_bbox_head_num_classes_directly():
     assert "bbox_head=dict(" in content
     assert "num_classes=2" in content
     assert "head_module=dict(" not in content
+    assert "assigner=dict(" not in content
+
+
+def test_generated_config_yolov8_keeps_assigner_num_classes_override():
+    content = build_mmyolo_config_content(
+        _sample_params(
+            arch="yolov8",
+            base_cfg="yolov8_s_syncbn_fast_8xb16-500e_coco.py",
+            is_dji_mode=False,
+        )
+    )
+    assert "assigner=dict(" in content
+    assert "num_classes=2" in content
+
+
+def test_generated_config_rtmdet_omits_assigner_num_classes_override():
+    content = build_mmyolo_config_content(
+        _sample_params(
+            arch="rtmdet",
+            base_cfg="rtmdet_s_syncbn_fast_8xb32-300e_coco.py",
+            is_dji_mode=False,
+        )
+    )
+    assert "head_module=dict(" in content
+    assert "assigner=dict(" not in content
 
 
 def test_generated_config_skips_pretrained_for_dji_widen_025():

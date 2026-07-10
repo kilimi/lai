@@ -33,6 +33,24 @@ from app.services.dataset_video_service import video_progress_get, video_progres
 logger = logging.getLogger(__name__)
 
 
+def _collection_image_dir(project_id: int, dataset_id: int, collection_id: int | None) -> Path:
+    base = Path("projects") / str(project_id) / str(dataset_id) / "images"
+    if collection_id is None:
+        return base
+    return base / f"c{int(collection_id)}"
+
+
+def _next_available_filename(target_dir: Path, requested_name: str) -> str:
+    clean_name = os.path.basename(requested_name or "")
+    name, ext = os.path.splitext(clean_name)
+    candidate = clean_name
+    counter = 1
+    while (target_dir / candidate).exists():
+        candidate = f"{name}_{counter}{ext}"
+        counter += 1
+    return candidate
+
+
 async def upload_dataset_images(db: Session, dataset_id: int, files: List[UploadFile], base_url: str) -> dict:
     try:
         # Add debug logging
@@ -75,21 +93,13 @@ async def upload_dataset_images(db: Session, dataset_id: int, files: List[Upload
                 )
                 db.add(default_collection)
                 db.flush()  # Get the ID without committing the full transaction
+
+            target_dir = _collection_image_dir(project_id, dataset_id, default_collection.id)
+            target_dir.mkdir(parents=True, exist_ok=True)
             
-            # Check if file already exists on disk (across all collections) and generate unique filename.
-            # Never append collection name to filenames; keep only numeric conflict suffixes.
-            original_path = dataset_dir / clean_filename
-            final_filename = clean_filename
-            counter = 1
-            
-            # Generate unique filename if file already exists on disk.
-            while original_path.exists():
-                name, ext = os.path.splitext(clean_filename)
-                final_filename = f"{name}_{counter}{ext}"
-                original_path = dataset_dir / final_filename
-                counter += 1
-            
-            file_path = original_path
+            # Resolve uniqueness only inside the target collection directory.
+            final_filename = _next_available_filename(target_dir, clean_filename)
+            file_path = target_dir / final_filename
             
             try:
                 contents = await file.read()
@@ -121,11 +131,11 @@ async def upload_dataset_images(db: Session, dataset_id: int, files: List[Upload
                         name, _ = os.path.splitext(final_filename)
                         png_filename = f"{name}.png"
                         
-                        png_path = dataset_dir / png_filename
+                        png_path = target_dir / png_filename
                         counter = 1
                         while png_path.exists():
                             png_filename = f"{name}_{counter}.png"
-                            png_path = dataset_dir / png_filename
+                            png_path = target_dir / png_filename
                             counter += 1
                         
                         final_filename = png_filename
@@ -144,7 +154,7 @@ async def upload_dataset_images(db: Session, dataset_id: int, files: List[Upload
                         try:
                             print(f"DEBUG: Trying OpenCV for {final_filename}")
                             # Save temp file for OpenCV to read
-                            temp_path = dataset_dir / f"temp_{uuid.uuid4().hex[:8]}.tif"
+                            temp_path = target_dir / f"temp_{uuid.uuid4().hex[:8]}.tif"
                             with open(temp_path, 'wb') as temp_file:
                                 temp_file.write(contents)
                             
@@ -222,11 +232,11 @@ async def upload_dataset_images(db: Session, dataset_id: int, files: List[Upload
                                 name, _ = os.path.splitext(final_filename)
                                 png_filename = f"{name}.png"
                                 
-                                png_path = dataset_dir / png_filename
+                                png_path = target_dir / png_filename
                                 counter = 1
                                 while png_path.exists():
                                     png_filename = f"{name}_{counter}.png"
-                                    png_path = dataset_dir / png_filename
+                                    png_path = target_dir / png_filename
                                     counter += 1
                                 
                                 final_filename = png_filename
@@ -256,7 +266,10 @@ async def upload_dataset_images(db: Session, dataset_id: int, files: List[Upload
                     f.write(contents)
                 
                 # Update URL to use the new structure with the final filename
-                relative_url = f"/static/projects/{project_id}/{dataset_id}/images/{final_filename}"
+                relative_url = (
+                    f"/static/projects/{project_id}/{dataset_id}/images/"
+                    f"c{default_collection.id}/{final_filename}"
+                )
                 # Always create new image record since we generate unique filenames
                 db_image = models.Image(
                     dataset_id=dataset_id,

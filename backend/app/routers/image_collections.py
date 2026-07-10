@@ -27,12 +27,31 @@ from ..schemas import (
 router = APIRouter()
 
 
-def _delete_image_physical_files(project_id: int, dataset_id: int, file_name: str) -> None:
+def _collection_image_dir(dataset_id: int, project_id: int, collection_id: int | None) -> Path:
+    base = Path("projects") / str(project_id) / str(dataset_id) / "images"
+    if collection_id is None:
+        return base
+    return base / f"c{int(collection_id)}"
+
+
+def _next_available_filename(target_dir: Path, requested_name: str) -> str:
+    clean_name = os.path.basename(requested_name or "")
+    name, ext = os.path.splitext(clean_name)
+    candidate = clean_name
+    counter = 1
+    while (target_dir / candidate).exists():
+        candidate = f"{name}_{counter}{ext}"
+        counter += 1
+    return candidate
+
+
+def _delete_image_physical_files(project_id: int, dataset_id: int, file_name: str, collection_id: int | None) -> None:
     """
     Remove the main image file, optional thumbnails/ copy, and generated .thumbs cache files.
     Tolerates missing paths (partial cleanup).
     """
     image_dirs = [
+        _collection_image_dir(dataset_id, project_id, collection_id),
         Path("projects") / str(project_id) / str(dataset_id) / "images",
         Path("data") / "images" / str(dataset_id),
     ]
@@ -249,7 +268,7 @@ def delete_image_collection(
     images_in_collection = db.query(Image).filter(Image.collection_id == collection_id).all()
     for image in images_in_collection:
         try:
-            _delete_image_physical_files(project_id, dataset_id, image.file_name)
+            _delete_image_physical_files(project_id, dataset_id, image.file_name, image.collection_id)
         except Exception:
             pass
         if AnnotationFileImage is not None:
@@ -325,10 +344,12 @@ async def upload_images_to_collection(
     
     base_url = public_request_base_url(request)
     
-    # Create upload directory using the same structure as the main upload
+    # Create upload directory using collection-scoped storage so identical
+    # basenames can coexist across collections.
     project_id = dataset.project_id
     dataset_dir = Path("projects") / str(project_id) / str(dataset_id) / "images"
-    dataset_dir.mkdir(parents=True, exist_ok=True)
+    target_dir = _collection_image_dir(dataset_id, project_id, collection_id)
+    target_dir.mkdir(parents=True, exist_ok=True)
     
     uploaded_images = []
     
@@ -341,20 +362,8 @@ async def upload_images_to_collection(
         if not (is_image_mime or is_tiff_file):
             continue
         
-        # Check if file already exists on disk (across all collections)
-        original_path = dataset_dir / clean_filename
-        final_filename = clean_filename
-        counter = 1
-        
-        # Generate unique filename if file already exists on disk.
-        # Never append collection name to filenames; keep only numeric conflict suffixes.
-        while original_path.exists():
-            name, ext = os.path.splitext(clean_filename)
-            final_filename = f"{name}_{counter}{ext}"
-            original_path = dataset_dir / final_filename
-            counter += 1
-        
-        file_path = original_path
+        final_filename = _next_available_filename(target_dir, clean_filename)
+        file_path = target_dir / final_filename
         
         try:
             contents = await file.read()
@@ -386,11 +395,11 @@ async def upload_images_to_collection(
                     name, _ = os.path.splitext(final_filename)
                     png_filename = f"{name}.png"
                     
-                    png_path = dataset_dir / png_filename
+                    png_path = target_dir / png_filename
                     counter = 1
                     while png_path.exists():
                         png_filename = f"{name}_{counter}.png"
-                        png_path = dataset_dir / png_filename
+                        png_path = target_dir / png_filename
                         counter += 1
                     
                     final_filename = png_filename
@@ -409,7 +418,7 @@ async def upload_images_to_collection(
                     try:
                         print(f"DEBUG: Trying OpenCV for {final_filename}")
                         # Save temp file for OpenCV to read
-                        temp_path = dataset_dir / f"temp_{uuid.uuid4().hex[:8]}.tif"
+                        temp_path = target_dir / f"temp_{uuid.uuid4().hex[:8]}.tif"
                         with open(temp_path, 'wb') as temp_file:
                             temp_file.write(contents)
                         
@@ -489,11 +498,11 @@ async def upload_images_to_collection(
                             name, _ = os.path.splitext(final_filename)
                             png_filename = f"{name}.png"
                             
-                            png_path = dataset_dir / png_filename
+                            png_path = target_dir / png_filename
                             counter = 1
                             while png_path.exists():
                                 png_filename = f"{name}_{counter}.png"
-                                png_path = dataset_dir / png_filename
+                                png_path = target_dir / png_filename
                                 counter += 1
                             
                             final_filename = png_filename
@@ -524,7 +533,7 @@ async def upload_images_to_collection(
                 f.write(contents)
             
             # Update URL to use the new structure with the final filename
-            relative_url = f"/static/projects/{project_id}/{dataset_id}/images/{final_filename}"
+            relative_url = f"/static/projects/{project_id}/{dataset_id}/images/c{collection_id}/{final_filename}"
             
             # Always create new image record since we generate unique filenames
             image = Image(
@@ -612,8 +621,28 @@ def move_image_to_collection(
     
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
-    
+
+    dataset = db.query(Dataset).filter(Dataset.id == image.dataset_id).first()
+    if not dataset:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    source_path = _collection_image_dir(image.dataset_id, dataset.project_id, image.collection_id) / image.file_name
+    if not source_path.exists():
+        legacy_root_path = _collection_image_dir(image.dataset_id, dataset.project_id, None) / image.file_name
+        if legacy_root_path.exists():
+            source_path = legacy_root_path
+    target_dir = _collection_image_dir(image.dataset_id, dataset.project_id, collection_id)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    final_filename = _next_available_filename(target_dir, image.file_name)
+    target_path = target_dir / final_filename
+
+    if source_path.exists() and source_path.resolve() != target_path.resolve():
+        shutil.move(str(source_path), str(target_path))
+
     image.collection_id = collection_id
+    image.file_name = final_filename
+    image.url = f"/static/projects/{dataset.project_id}/{image.dataset_id}/images/c{collection_id}/{final_filename}"
+    image.thumbnail_url = image.url
     db.commit()
     
     return {"message": "Image moved successfully"}

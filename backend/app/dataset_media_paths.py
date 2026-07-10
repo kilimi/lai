@@ -87,9 +87,9 @@ def iter_candidate_relative_paths_under_images(
         if not v or v in seen:
             continue
         seen.add(v)
-        out.append((v,))
         if coll_prefix:
             out.append((*coll_prefix, v))
+        out.append((v,))
 
     if coll_prefix and basename:
         t = (*coll_prefix, basename)
